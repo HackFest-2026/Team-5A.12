@@ -1,14 +1,71 @@
 import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { Button } from "./button";
 import { cn } from "@/lib/utils";
 
-export function Modal({title,detail,children,close,wide=false}:{title:string;detail?:string;children:ReactNode;close:()=>void;wide?:boolean}){
-  useEffect(()=>{const key=(event:KeyboardEvent)=>{if(event.key==="Escape")close()};document.addEventListener("keydown",key);const previous=document.body.style.overflow;document.body.style.overflow="hidden";return()=>{document.removeEventListener("keydown",key);document.body.style.overflow=previous}},[close]);
-  return <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-50 flex justify-end bg-ink/35 backdrop-blur-sm" onMouseDown={close}>
-    <section className={cn("h-full w-full overflow-y-auto bg-white shadow-lift animate-[enter_180ms_ease-out]",wide?"max-w-3xl":"max-w-xl")} onMouseDown={event=>event.stopPropagation()}>
-      <header className="sticky top-0 z-10 flex items-start justify-between border-b border-line bg-white/95 p-5 backdrop-blur-xl"><div><h2 className="text-xl font-extrabold tracking-[-.035em]">{title}</h2>{detail&&<p className="mt-1 text-sm text-muted">{detail}</p>}</div><Button variant="ghost" size="icon" aria-label="Close" onClick={close}><X size={18}/></Button></header>
-      <div className="p-5">{children}</div>
-    </section>
-  </div>;
+export function Modal({
+  title,
+  detail,
+  children,
+  close,
+  wide = false,
+}: {
+  title: string;
+  detail?: string;
+  children: ReactNode;
+  close: () => void;
+  wide?: boolean;
+}) {
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    document.addEventListener("keydown", key);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", key);
+      document.body.style.overflow = previous;
+    };
+  }, [close]);
+
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      className="fixed inset-y-0 left-0 right-0 z-[70] flex items-center justify-center overflow-hidden bg-ink/40 p-3 backdrop-blur-sm sm:p-6 lg:right-[390px] xl:right-[420px]"
+      onMouseDown={close}
+    >
+      <section
+        className={cn(
+          "flex max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-[22px] border border-line bg-white shadow-lift animate-[enter_180ms_ease-out] sm:max-h-[calc(100dvh-3rem)]",
+          wide ? "max-w-3xl" : "max-w-xl",
+        )}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className="flex shrink-0 items-start justify-between border-b border-line bg-white/95 p-5 backdrop-blur-xl sm:px-6">
+          <div>
+            <h2 className="text-xl font-extrabold tracking-[-.035em]">
+              {title}
+            </h2>
+            {detail && <p className="mt-1 text-sm text-muted">{detail}</p>}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="Close"
+            onClick={close}
+          >
+            <X size={18} />
+          </Button>
+        </header>
+        <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-5 sm:p-6">
+          {children}
+        </div>
+      </section>
+    </div>,
+    document.body,
+  );
 }

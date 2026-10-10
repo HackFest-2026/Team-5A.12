@@ -1,7 +1,16 @@
 import { useMemo, useState } from "react";
-import { CreditCard, Landmark, Plus, Search, Smartphone, Trash2 } from "lucide-react";
+import {
+  CreditCard,
+  Landmark,
+  Plus,
+  Search,
+  Smartphone,
+  Trash2,
+} from "lucide-react";
+import { useSearchParams } from "react-router-dom";
 import { useRole } from "@/context/role-context";
 import { useApi } from "@/hooks/use-api";
+import { useAgentPrefill } from "@/hooks/use-agent-prefill";
 import { api } from "@/lib/api";
 import { money, shortDate } from "@/lib/utils";
 import { PageHeading } from "@/components/page-heading";
@@ -12,21 +21,410 @@ import { Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 
-type Payment={id:string;invoice_id:string;amount:number;method:string;reference:string;status:string;paid_at:string;number:string;company:string};
-type Invoice={id:string;number:string;balance:number;status:string;company:string};
-const icons:Record<string,typeof CreditCard>={"Bank transfer":Landmark,"UPI":Smartphone,"Card":CreditCard};
+type Payment = {
+  id: string;
+  invoice_id: string;
+  amount: number;
+  method: string;
+  reference: string;
+  status: string;
+  paid_at: string;
+  number: string;
+  company: string;
+};
+type Invoice = {
+  id: string;
+  number: string;
+  balance: number;
+  status: string;
+  company: string;
+};
+const icons: Record<string, typeof CreditCard> = {
+  "Bank transfer": Landmark,
+  UPI: Smartphone,
+  Card: CreditCard,
+};
 
-export function PaymentsPage(){const{role}=useRole();const{data,error,loading,reload}=useApi<Payment[]>("/api/payments");const invoices=useApi<Invoice[]>(role==="cfo"?"/api/invoices":"/api/payments");const[search,setSearch]=useState("");const[creating,setCreating]=useState(false);const[selected,setSelected]=useState<Payment|null>(null);const[notice,setNotice]=useState("");const filtered=useMemo(()=>(data??[]).filter(p=>`${p.reference} ${p.company} ${p.number}`.toLowerCase().includes(search.toLowerCase())),[data,search]);if(loading)return<LoadingState/>;if(error||!data)return<ErrorState message={error} retry={reload}/>;const total=data.reduce((sum,p)=>sum+p.amount,0);return<>
-  <PageHeading eyebrow="Money movement" title="Payments" detail="Reconciled receipts with source references and linked invoices." action={role==="cfo"?<Button variant="brand" onClick={()=>setCreating(true)}><Plus size={15}/>Record payment</Button>:undefined}/>
-  {notice&&<div className="mb-4 rounded-xl bg-brand-soft px-4 py-3 text-sm font-semibold text-brand-dark">{notice}</div>}
-  <div className="mb-5 grid gap-4 sm:grid-cols-3"><Stat label="Settled volume" value={money(total,true)} note={`${data.length} completed receipts`}/><Stat label="Bank transfer" value={money(data.filter(p=>p.method==="Bank transfer").reduce((sum,p)=>sum+p.amount,0),true)} note="Primary collection rail"/><Stat label="Reconciliation" value="100%" note="Every receipt linked"/></div>
-  <Card className="overflow-hidden"><div className="flex items-center gap-3 border-b border-line p-4"><div className="relative max-w-sm flex-1"><Search className="absolute left-3 top-3 text-muted" size={16}/><Input className="pl-9" placeholder="Search payment reference…" value={search} onChange={e=>setSearch(e.target.value)}/></div></div><div className="divide-y divide-line">{filtered.map(payment=>{const Icon=icons[payment.method]??CreditCard;return<div key={payment.id} onClick={()=>setSelected(payment)} className="flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:bg-canvas/60 sm:flex-row sm:items-center sm:px-5"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-canvas text-muted"><Icon size={18}/></div><div className="min-w-0 flex-1"><p className="font-bold">{payment.company}</p><p className="mt-0.5 text-xs text-muted">{payment.number} · {payment.reference}</p></div><div className="sm:text-right"><p className="font-bold tabular">{money(payment.amount)}</p><p className="text-xs text-muted">{shortDate(payment.paid_at)}</p></div><Badge tone="green">{payment.status}</Badge></div>})}</div></Card>
-  {creating&&<PaymentCreate invoices={(invoices.data??[]).filter(i=>i.balance>0)} close={()=>setCreating(false)} done={async()=>{setCreating(false);setNotice("Payment recorded and invoice balance updated.");await reload()}}/>}
-  {selected&&<PaymentModal payment={selected} canEdit={role==="cfo"} close={()=>setSelected(null)} changed={async message=>{setNotice(message);await reload()}}/>}
-  </>}
+export function PaymentsPage() {
+  const { role } = useRole();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { data, error, loading, reload } = useApi<Payment[]>("/api/payments");
+  const invoices = useApi<Invoice[]>(
+    role === "cfo" ? "/api/invoices" : "/api/payments",
+  );
+  const [search, setSearch] = useState("");
+  const creating = searchParams.get("modal") === "record-payment";
+  const setCreating = (open: boolean) => {
+    const next = new URLSearchParams(searchParams);
+    if (open) next.set("modal", "record-payment");
+    else next.delete("modal");
+    setSearchParams(next, { replace: true });
+  };
+  const [selected, setSelected] = useState<Payment | null>(null);
+  const [notice, setNotice] = useState("");
+  const filtered = useMemo(
+    () =>
+      (data ?? []).filter((p) =>
+        `${p.reference} ${p.company} ${p.number}`
+          .toLowerCase()
+          .includes(search.toLowerCase()),
+      ),
+    [data, search],
+  );
+  if (loading) return <LoadingState />;
+  if (error || !data) return <ErrorState message={error} retry={reload} />;
+  const total = data.reduce((sum, p) => sum + p.amount, 0);
+  return (
+    <>
+      <PageHeading
+        eyebrow="Money movement"
+        title="Payments"
+        detail="Reconciled receipts with source references and linked invoices."
+        action={
+          role === "cfo" ? (
+            <Button variant="brand" onClick={() => setCreating(true)}>
+              <Plus size={15} />
+              Record payment
+            </Button>
+          ) : undefined
+        }
+      />
+      {notice && (
+        <div className="mb-4 rounded-xl bg-brand-soft px-4 py-3 text-sm font-semibold text-brand-dark">
+          {notice}
+        </div>
+      )}
+      <div className="mb-5 grid gap-4 sm:grid-cols-3">
+        <Stat
+          label="Settled volume"
+          value={money(total, true)}
+          note={`${data.length} completed receipts`}
+        />
+        <Stat
+          label="Bank transfer"
+          value={money(
+            data
+              .filter((p) => p.method === "Bank transfer")
+              .reduce((sum, p) => sum + p.amount, 0),
+            true,
+          )}
+          note="Primary collection rail"
+        />
+        <Stat label="Reconciliation" value="100%" note="Every receipt linked" />
+      </div>
+      <Card className="overflow-hidden">
+        <div className="flex items-center gap-3 border-b border-line p-4">
+          <div className="relative max-w-sm flex-1">
+            <Search className="absolute left-3 top-3 text-muted" size={16} />
+            <Input
+              className="pl-9"
+              placeholder="Search payment reference…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="divide-y divide-line">
+          {filtered.map((payment) => {
+            const Icon = icons[payment.method] ?? CreditCard;
+            return (
+              <div
+                key={payment.id}
+                onClick={() => setSelected(payment)}
+                className="flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:bg-canvas/60 sm:flex-row sm:items-center sm:px-5"
+              >
+                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-canvas text-muted">
+                  <Icon size={18} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="font-bold">{payment.company}</p>
+                  <p className="mt-0.5 text-xs text-muted">
+                    {payment.number} · {payment.reference}
+                  </p>
+                </div>
+                <div className="sm:text-right">
+                  <p className="font-bold tabular">{money(payment.amount)}</p>
+                  <p className="text-xs text-muted">
+                    {shortDate(payment.paid_at)}
+                  </p>
+                </div>
+                <Badge tone="green">{payment.status}</Badge>
+              </div>
+            );
+          })}
+        </div>
+      </Card>
+      {creating && role === "cfo" && (
+        <PaymentCreate
+          invoices={(invoices.data ?? []).filter((i) => i.balance > 0)}
+          close={() => setCreating(false)}
+          done={async () => {
+            setCreating(false);
+            setNotice("Payment recorded and invoice balance updated.");
+            await reload();
+          }}
+        />
+      )}
+      {selected && (
+        <PaymentModal
+          payment={selected}
+          canEdit={role === "cfo"}
+          close={() => setSelected(null)}
+          changed={async (message) => {
+            setNotice(message);
+            await reload();
+          }}
+        />
+      )}
+    </>
+  );
+}
 
-function PaymentCreate({invoices,close,done}:{invoices:Invoice[];close:()=>void;done:()=>Promise<void>}){const[form,setForm]=useState({invoiceId:invoices[0]?.id??"",amount:"",method:"Bank transfer",reference:"",paidAt:new Date().toISOString().slice(0,16)});const[busy,setBusy]=useState(false);const[error,setError]=useState("");const selected=invoices.find(i=>i.id===form.invoiceId);const submit=async(e:React.FormEvent)=>{e.preventDefault();setBusy(true);setError("");try{await api.post("/api/payments",undefined,{...form,amount:Number(form.amount),paidAt:new Date(form.paidAt).toISOString()});await done()}catch(err){setError(err instanceof Error?err.message:"Unable to record payment")}finally{setBusy(false)}};return<Modal title="Record payment" detail="Link a receipt directly to its invoice." close={close}><form onSubmit={submit} className="grid gap-4"><Field label="Invoice"><Select className="w-full" value={form.invoiceId} onChange={e=>setForm({...form,invoiceId:e.target.value})} required>{invoices.map(invoice=><option key={invoice.id} value={invoice.id}>{invoice.number} · {invoice.company} · {money(invoice.balance)} due</option>)}</Select></Field>{selected&&<p className="rounded-xl bg-canvas p-3 text-xs text-muted">Available balance: <b className="text-ink">{money(selected.balance)}</b></p>}<div className="grid gap-4 sm:grid-cols-2"><Field label="Amount"><Input type="number" min={1} max={selected?.balance} value={form.amount} onChange={e=>setForm({...form,amount:e.target.value})} required/></Field><Field label="Method"><Select className="w-full" value={form.method} onChange={e=>setForm({...form,method:e.target.value})}><option>Bank transfer</option><option>UPI</option><option>Card</option></Select></Field><Field label="Reference"><Input value={form.reference} onChange={e=>setForm({...form,reference:e.target.value})} placeholder="UTR or payment ID" required/></Field><Field label="Received at"><Input type="datetime-local" value={form.paidAt} onChange={e=>setForm({...form,paidAt:e.target.value})} required/></Field></div>{error&&<p className="text-sm font-semibold text-coral">{error}</p>}<div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={close}>Cancel</Button><Button variant="brand" disabled={busy||!invoices.length}>{busy?"Recording…":"Record payment"}</Button></div></form></Modal>}
+function PaymentCreate({
+  invoices,
+  close,
+  done,
+}: {
+  invoices: Invoice[];
+  close: () => void;
+  done: () => Promise<void>;
+}) {
+  const [form, setForm] = useAgentPrefill("action.payment.record", {
+    invoiceId: invoices[0]?.id ?? "",
+    amount: "",
+    method: "Bank transfer",
+    reference: "",
+    paidAt: new Date().toISOString().slice(0, 16),
+  });
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const selected = invoices.find((i) => i.id === form.invoiceId);
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api.post("/api/payments", undefined, {
+        ...form,
+        amount: Number(form.amount),
+        paidAt: new Date(form.paidAt).toISOString(),
+      });
+      await done();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to record payment");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title="Record payment"
+      detail="Link a receipt directly to its invoice."
+      close={close}
+    >
+      <form onSubmit={submit} className="grid gap-4">
+        <Field label="Invoice">
+          <Select
+            className="w-full"
+            value={form.invoiceId}
+            onChange={(e) => setForm({ ...form, invoiceId: e.target.value })}
+            required
+          >
+            {invoices.map((invoice) => (
+              <option key={invoice.id} value={invoice.id}>
+                {invoice.number} · {invoice.company} · {money(invoice.balance)}{" "}
+                due
+              </option>
+            ))}
+          </Select>
+        </Field>
+        {selected && (
+          <p className="rounded-xl bg-canvas p-3 text-xs text-muted">
+            Available balance:{" "}
+            <b className="text-ink">{money(selected.balance)}</b>
+          </p>
+        )}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Amount">
+            <Input
+              type="number"
+              min={1}
+              max={selected?.balance}
+              value={form.amount}
+              onChange={(e) => setForm({ ...form, amount: e.target.value })}
+              required
+            />
+          </Field>
+          <Field label="Method">
+            <Select
+              className="w-full"
+              value={form.method}
+              onChange={(e) => setForm({ ...form, method: e.target.value })}
+            >
+              <option>Bank transfer</option>
+              <option>UPI</option>
+              <option>Card</option>
+            </Select>
+          </Field>
+          <Field label="Reference">
+            <Input
+              value={form.reference}
+              onChange={(e) => setForm({ ...form, reference: e.target.value })}
+              placeholder="UTR or payment ID"
+              required
+            />
+          </Field>
+          <Field label="Received at">
+            <Input
+              type="datetime-local"
+              value={form.paidAt}
+              onChange={(e) => setForm({ ...form, paidAt: e.target.value })}
+              required
+            />
+          </Field>
+        </div>
+        {error && <p className="text-sm font-semibold text-coral">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={close}>
+            Cancel
+          </Button>
+          <Button variant="brand" disabled={busy || !invoices.length}>
+            {busy ? "Recording…" : "Record payment"}
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
 
-function PaymentModal({payment,canEdit,close,changed}:{payment:Payment;canEdit:boolean;close:()=>void;changed:(message:string)=>Promise<void>}){const[method,setMethod]=useState(payment.method);const[reference,setReference]=useState(payment.reference);const[busy,setBusy]=useState(false);const[error,setError]=useState("");const save=async()=>{setBusy(true);setError("");try{await api.patch(`/api/payments/${payment.id}`,{method,reference});await changed("Payment details updated.");close()}catch(err){setError(err instanceof Error?err.message:"Update failed")}finally{setBusy(false)}};const remove=async()=>{if(!confirm("Delete this payment and restore the invoice balance?"))return;setBusy(true);try{await api.delete(`/api/payments/${payment.id}`);await changed("Payment deleted and invoice balance restored.");close()}catch(err){setError(err instanceof Error?err.message:"Delete failed")}finally{setBusy(false)}};return<Modal title={money(payment.amount)} detail={`${payment.company} · ${payment.number}`} close={close}><div className="grid gap-3 sm:grid-cols-2"><Info label="Reference" value={payment.reference}/><Info label="Received" value={shortDate(payment.paid_at)}/><Info label="Method" value={payment.method}/><Info label="Status" value={payment.status}/></div>{canEdit&&<div className="mt-6 grid gap-4"><Field label="Method"><Select className="w-full" value={method} onChange={e=>setMethod(e.target.value)}><option>Bank transfer</option><option>UPI</option><option>Card</option></Select></Field><Field label="Reference"><Input value={reference} onChange={e=>setReference(e.target.value)}/></Field></div>}{error&&<p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-coral">{error}</p>}<div className="mt-6 flex justify-between">{canEdit?<Button variant="danger" disabled={busy} onClick={()=>void remove()}><Trash2 size={14}/>Delete payment</Button>:<span/>}<div className="flex gap-2"><Button variant="ghost" onClick={close}>Close</Button>{canEdit&&<Button variant="brand" disabled={busy} onClick={()=>void save()}>{busy?"Saving…":"Save changes"}</Button>}</div></div></Modal>}
-function Field({label,children}:{label:string;children:React.ReactNode}){return<label className="text-xs font-bold text-muted">{label}<div className="mt-1.5">{children}</div></label>}
-function Info({label,value}:{label:string;value:string}){return<div className="rounded-xl bg-canvas p-4"><p className="text-[10px] font-bold uppercase tracking-wide text-muted">{label}</p><p className="mt-1 font-bold capitalize">{value}</p></div>}
+function PaymentModal({
+  payment,
+  canEdit,
+  close,
+  changed,
+}: {
+  payment: Payment;
+  canEdit: boolean;
+  close: () => void;
+  changed: (message: string) => Promise<void>;
+}) {
+  const [method, setMethod] = useState(payment.method);
+  const [reference, setReference] = useState(payment.reference);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await api.patch(`/api/payments/${payment.id}`, { method, reference });
+      await changed("Payment details updated.");
+      close();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Update failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async () => {
+    if (!confirm("Delete this payment and restore the invoice balance?"))
+      return;
+    setBusy(true);
+    try {
+      await api.delete(`/api/payments/${payment.id}`);
+      await changed("Payment deleted and invoice balance restored.");
+      close();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Modal
+      title={money(payment.amount)}
+      detail={`${payment.company} · ${payment.number}`}
+      close={close}
+    >
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Info label="Reference" value={payment.reference} />
+        <Info label="Received" value={shortDate(payment.paid_at)} />
+        <Info label="Method" value={payment.method} />
+        <Info label="Status" value={payment.status} />
+      </div>
+      {canEdit && (
+        <div className="mt-6 grid gap-4">
+          <Field label="Method">
+            <Select
+              className="w-full"
+              value={method}
+              onChange={(e) => setMethod(e.target.value)}
+            >
+              <option>Bank transfer</option>
+              <option>UPI</option>
+              <option>Card</option>
+            </Select>
+          </Field>
+          <Field label="Reference">
+            <Input
+              value={reference}
+              onChange={(e) => setReference(e.target.value)}
+            />
+          </Field>
+        </div>
+      )}
+      {error && (
+        <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm font-semibold text-coral">
+          {error}
+        </p>
+      )}
+      <div className="mt-6 flex justify-between">
+        {canEdit ? (
+          <Button
+            variant="danger"
+            disabled={busy}
+            onClick={() => void remove()}
+          >
+            <Trash2 size={14} />
+            Delete payment
+          </Button>
+        ) : (
+          <span />
+        )}
+        <div className="flex gap-2">
+          <Button variant="ghost" onClick={close}>
+            Close
+          </Button>
+          {canEdit && (
+            <Button variant="brand" disabled={busy} onClick={() => void save()}>
+              {busy ? "Saving…" : "Save changes"}
+            </Button>
+          )}
+        </div>
+      </div>
+    </Modal>
+  );
+}
+function Field({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="text-xs font-bold text-muted">
+      {label}
+      <div className="mt-1.5">{children}</div>
+    </label>
+  );
+}
+function Info({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl bg-canvas p-4">
+      <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
+        {label}
+      </p>
+      <p className="mt-1 font-bold capitalize">{value}</p>
+    </div>
+  );
+}

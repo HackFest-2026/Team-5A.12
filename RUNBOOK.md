@@ -16,6 +16,7 @@ cd /Users/shivanandhulikatti/Desktop/dev/hackathons/kle-hackfest/cashpilot-agent
 cp .env.example .env
 npm install
 npm run db:up
+npm run db:migrate
 ```
 
 The database is automatically created and seeded from `db/init.sql` the first time its Docker volume starts.
@@ -31,6 +32,9 @@ npm run dev
 ```
 
 `npm run dev` starts both the React frontend and Express API. Keep this terminal open.
+It also applies pending database migrations before starting either service.
+
+To enable model planning, set `OPENROUTER_API_KEY` in `.env`. Without it, navigation, proactive signals, live reads, and a limited safe write resolver remain available through the local-tools fallback.
 
 | Service | Address |
 | --- | --- |

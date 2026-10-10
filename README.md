@@ -32,14 +32,29 @@ Authentication uses revocable, HTTP-only database sessions. Roles and tenant sco
 
 `GET /api/context/catalog` exposes pages, widgets, filters, entities, metrics, actions, roles, and API bindings. Mutations are role-checked and recorded in the audit log.
 
-## Agent implementation status
+## Agent implementation
 
-The first deterministic agent slice is available:
+CashPilot now includes a persistent, tool-using finance agent:
 
-- `POST /api/agent/runs` accepts a natural-language request plus the current page context.
-- The role-scoped catalog resolves navigation without exposing inaccessible pages.
-- Typed UI commands navigate the browser and acknowledge a new UI-state version.
-- Invoice status and search filters are URL-backed, including requests such as “Show overdue invoices.”
-- The embedded **Ask CashPilot** panel sends route, query, locale, and timezone context.
+- OpenRouter planning with role-scoped read and write tools.
+- Live dashboard, invoice, customer, payment, cash-flow, dispute, approval, audit, and tenant retrieval.
+- Persistent runs, steps, evidence, pending actions, and idempotency keys.
+- Confirm-before-execute writes for invoice creation/update, reminders, payments, disputes, and approvals.
+- Authorization rechecks, payload hashing, expiry, idempotency, audit records, and read-after-write results.
+- Proactive signals derived from live collection risk, pending approvals, customer invoices, and tenant status.
+- Catalog-driven navigation for every registered page and product form; ambiguous and analytical requests go through OpenRouter.
+- Interactive evidence cards, current UI context, token/latency metrics, and a visible execution trace.
+- Proactive CFO command-center insight and invoice-level “Why overdue?” agent entry points.
+- Eight-second undo window for agent-executed reminders and recorded payments.
+- Local live-data fallback when OpenRouter is not configured.
 
-This slice intentionally handles navigation only. Finance retrieval, evidence-backed answers, OpenRouter planning, confirmations, and write tools remain in the next milestones.
+### OpenRouter configuration
+
+Add a server-side API key to `.env`:
+
+```bash
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=google/gemini-3-flash-preview
+```
+
+The key is never exposed to the browser. Requests use OpenRouter's tool-calling API and request zero-data-retention routing. Keep account-level privacy controls enabled for sensitive finance data.

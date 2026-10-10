@@ -13,6 +13,11 @@ export function useApi<T>(path: string) {
     catch (e) { setError(e instanceof Error ? e.message : "Request failed"); }
     finally { setLoading(false); }
   }, [path, role]);
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    const changed = () => void load();
+    window.addEventListener("cashpilot:data-changed", changed);
+    return () => window.removeEventListener("cashpilot:data-changed", changed);
+  }, [load]);
   return { data, error, loading, reload: load };
 }

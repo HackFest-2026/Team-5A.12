@@ -1,11 +1,18 @@
 export type Role = "cfo" | "manager" | "customer" | "platform_admin";
 export type SessionUser = {
-  id: string; name: string; email: string; avatar: string; role: Role;
-  tenantId: string | null; tenantName: string | null; customerId: string | null;
+  id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  role: Role;
+  tenantId: string | null;
+  tenantName: string | null;
+  customerId: string | null;
 };
 
 export type AgentRunRequest = {
   message: string;
+  history?: Array<{ role: "user" | "assistant"; content: string }>;
   context: {
     pageId: string | null;
     route: string;
@@ -18,11 +25,67 @@ export type AgentRunRequest = {
 
 export type AgentRunResponse = {
   id: string;
-  status: "completed";
-  mode: "deterministic_navigation";
+  status: "completed" | "awaiting_confirmation";
+  mode: "deterministic_navigation" | "local_tools" | "openrouter_tools";
   answer: string;
-  uiCommand: null | { type: "navigate"; pageId: string; route: string; uiStateVersion: number };
-  trace: Array<{ step: string; outcome: string; actorRole?: Role }>;
+  uiCommand: null | {
+    type: "navigate";
+    pageId: string;
+    route: string;
+    uiStateVersion: number;
+    form?: {
+      actionId: string;
+      fields: Record<string, string | number>;
+      missingFields: string[];
+    };
+  };
+  pendingAction: AgentPendingAction | null;
+  evidence: AgentEvidence[];
+  trace: AgentTraceStep[];
+  metrics: { durationMs: number; tokens: number };
+};
+
+export type AgentEvidence = {
+  sourceType: string;
+  sourceId: string;
+  field: string;
+  value: unknown;
+  route: string;
+  observedAt: string;
+};
+
+export type AgentTraceStep = {
+  step: string;
+  tool?: string;
+  outcome: string;
+  durationMs?: number;
+  evidenceCount?: number;
+  usage?: unknown;
+};
+
+export type AgentPendingAction = {
+  id: string;
+  actionType: string;
+  summary: string;
+  payload: Record<string, unknown>;
+  expiresAt: string;
+};
+
+export type AgentSignal = {
+  id: string;
+  severity: "high" | "medium";
+  title: string;
+  detail: string;
+  route: string;
+  prompt: string;
+};
+
+export type AgentActionResult = {
+  actionId: string;
+  status: "completed" | "rejected" | "undone";
+  answer: string;
+  result?: unknown;
+  undoUntil?: string | null;
 };
 
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4001";
@@ -34,17 +97,29 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
   const body = await response.json().catch(() => ({}));
-  if (response.status === 401 && path !== "/api/auth/me" && path !== "/api/auth/login") window.dispatchEvent(new Event("cashpilot:unauthorized"));
+  if (
+    response.status === 401 &&
+    path !== "/api/auth/me" &&
+    path !== "/api/auth/login"
+  )
+    window.dispatchEvent(new Event("cashpilot:unauthorized"));
   if (!response.ok) throw new Error(body.error ?? "Request failed");
   return body;
 }
 
 export const api = {
   get: <T>(path: string, _role?: Role) => request<T>(path),
-  post: <T>(path: string, _role?: Role, body?: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
-  patch: <T>(path: string, body?: unknown) => request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
+  post: <T>(path: string, _role?: Role, body?: unknown) =>
+    request<T>(path, { method: "POST", body: JSON.stringify(body ?? {}) }),
+  patch: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: "PATCH", body: JSON.stringify(body ?? {}) }),
   delete: <T>(path: string) => request<T>(path, { method: "DELETE" }),
-  login: (email: string, password: string) => request<SessionUser>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) }),
+  login: (email: string, password: string) =>
+    request<SessionUser>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
+    }),
   me: () => request<SessionUser>("/api/auth/me"),
-  logout: () => request<{ok: boolean}>("/api/auth/logout", { method: "POST" }),
+  logout: () =>
+    request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
 };
