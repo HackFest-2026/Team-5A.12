@@ -1,0 +1,17 @@
+{
+  "name": "cashpilot-agentic",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,green \"npm run dev -w @cashpilot/api\" \"npm run dev -w @cashpilot/web\"",
+    "build": "npm run build -w @cashpilot/api && npm run build -w @cashpilot/web",
+    "typecheck": "npm run typecheck -w @cashpilot/api && npm run typecheck -w @cashpilot/web",
+    "db:up": "docker compose up -d postgres",
+    "db:down": "docker compose down",
+    "db:reset": "docker compose down -v && docker compose up -d postgres"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

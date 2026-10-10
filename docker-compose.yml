@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: cashpilot-agentic-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: cashpilot
+      POSTGRES_PASSWORD: cashpilot
+      POSTGRES_DB: cashpilot
+    ports:
+      - "5435:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cashpilot -d cashpilot"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+    volumes:
+      - cashpilot-data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/001-init.sql:ro
+
+volumes:
+  cashpilot-data:
