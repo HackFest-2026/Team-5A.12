@@ -4,6 +4,27 @@ export type SessionUser = {
   tenantId: string | null; tenantName: string | null; customerId: string | null;
 };
 
+export type AgentRunRequest = {
+  message: string;
+  context: {
+    pageId: string | null;
+    route: string;
+    search: string;
+    locale: string;
+    timezone: string;
+    uiStateVersion: number;
+  };
+};
+
+export type AgentRunResponse = {
+  id: string;
+  status: "completed";
+  mode: "deterministic_navigation";
+  answer: string;
+  uiCommand: null | { type: "navigate"; pageId: string; route: string; uiStateVersion: number };
+  trace: Array<{ step: string; outcome: string; actorRole?: Role }>;
+};
+
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4001";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {

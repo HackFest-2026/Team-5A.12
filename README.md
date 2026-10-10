@@ -31,3 +31,15 @@ Authentication uses revocable, HTTP-only database sessions. Roles and tenant sco
 ## Agent-ready foundation
 
 `GET /api/context/catalog` exposes pages, widgets, filters, entities, metrics, actions, roles, and API bindings. Mutations are role-checked and recorded in the audit log.
+
+## Agent implementation status
+
+The first deterministic agent slice is available:
+
+- `POST /api/agent/runs` accepts a natural-language request plus the current page context.
+- The role-scoped catalog resolves navigation without exposing inaccessible pages.
+- Typed UI commands navigate the browser and acknowledge a new UI-state version.
+- Invoice status and search filters are URL-backed, including requests such as “Show overdue invoices.”
+- The embedded **Ask CashPilot** panel sends route, query, locale, and timezone context.
+
+This slice intentionally handles navigation only. Finance retrieval, evidence-backed answers, OpenRouter planning, confirmations, and write tools remain in the next milestones.

@@ -3,6 +3,8 @@ import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { z } from "zod";
+import { agentCatalog, catalogForRole } from "./agent/catalog.js";
+import { resolveNavigation } from "./agent/navigation.js";
 import { db, query } from "./db.js";
 
 const app = express();
@@ -527,23 +529,56 @@ app.patch("/api/tenants/:tenantId/users/:userId", allow("platform_admin"), async
   res.json(updated);
 }));
 
+const agentRunSchema = z.object({
+  message: z.string().trim().min(1).max(500),
+  context: z.object({
+    pageId: z.string().max(80).nullable().optional(),
+    route: z.string().startsWith("/").max(200),
+    search: z.string().max(500).optional().default(""),
+    locale: z.string().max(40).optional(),
+    timezone: z.string().max(80).optional(),
+    uiStateVersion: z.number().int().nonnegative(),
+  }),
+});
+
+app.post("/api/agent/runs", asyncRoute(async (req, res) => {
+  const a = actor(req);
+  const input = agentRunSchema.parse(req.body);
+  const resolution = resolveNavigation(input.message, a.role, input.context);
+  res.status(201).json({
+    id: `run-${randomUUID()}`,
+    status: "completed",
+    mode: "deterministic_navigation",
+    answer: resolution.answer,
+    uiCommand: resolution.command,
+    trace: [
+      { step: "authenticate", outcome: "allowed", actorRole: a.role },
+      { step: "resolve_catalog", outcome: resolution.kind },
+    ],
+  });
+}));
+
+app.get("/api/agent/catalog", (req, res) => {
+  const a = actor(req);
+  res.json({
+    version: agentCatalog.version,
+    currentRole: a.role,
+    tenantId: a.tenantId,
+    pages: catalogForRole(a.role),
+    entities: agentCatalog.entities,
+    policy: agentCatalog.policy,
+  });
+});
+
 app.get("/api/context/catalog", (req, res) => {
   const a = actor(req);
   res.json({
-    version: "1.0", currentRole: a.role, tenantId: a.tenantId,
-    pages: [
-      { id:"overview", route:"/", roles:["cfo","manager","customer","platform_admin"], widgets:["kpis","cash-trend","risk-signals","activity"] },
-      { id:"cashflow", route:"/cashflow", roles:["cfo","manager"], filters:["period"], metrics:["inflow","outflow","forecast","aging"] },
-      { id:"invoices", route:"/invoices", roles:["cfo","manager","customer"], filters:["status","search","due_date"], actions:["open_detail","create","update","delete","send_reminder","open_dispute"] },
-      { id:"customers", route:"/customers", roles:["cfo","manager"], filters:["segment","health"], metrics:["outstanding","overdue_invoices"], actions:["open_detail","create","update","delete"] },
-      { id:"payments", route:"/payments", roles:["cfo","manager","customer"], filters:["method","status"], actions:["record","update_reference","delete"] },
-      { id:"disputes", route:"/disputes", roles:["cfo","manager","customer"], filters:["status"], actions:["open","review","resolve","reject"] },
-      { id:"approvals", route:"/approvals", roles:["cfo","manager"], actions:["approve","reject"] },
-      { id:"audit", route:"/audit", roles:["cfo","manager","platform_admin"] },
-      { id:"tenants", route:"/tenants", roles:["platform_admin"], filters:["status","plan"], actions:["provision_tenant","update_tenant","change_plan","suspend_tenant","reactivate_tenant","archive_tenant","provision_user","change_user_access"] },
-    ],
-    entities: ["tenant","user","session","customer","invoice","payment","dispute","approval","notification","audit_log"],
-    policy: { authentication:"http_only_session", tenantIsolation:"server_enforced", confirmationRequired:["approve","reject","send_reminder","create_invoice","open_dispute","suspend_tenant","disable_user"], customerScope:"own_records_only" },
+    version: agentCatalog.version,
+    currentRole: a.role,
+    tenantId: a.tenantId,
+    pages: catalogForRole(a.role),
+    entities: agentCatalog.entities,
+    policy: agentCatalog.policy,
   });
 });
 

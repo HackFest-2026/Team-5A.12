@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
-  Activity, BadgeIndianRupee, Bell, Bot, Building2, ChevronDown, CircleDollarSign,
+  Activity, BadgeIndianRupee, Bell, Bot, Building2, ChevronDown,
   FileCheck2, FileText, LayoutDashboard, LogOut, Menu, ReceiptText, ShieldCheck, Users, WalletCards, X,
 } from "lucide-react";
 import { useRole } from "@/context/role-context";
@@ -10,6 +10,7 @@ import { api } from "@/lib/api";
 import type { Role } from "@/lib/api";
 import { cn, relativeDate } from "@/lib/utils";
 import { Button } from "./ui/button";
+import { AgentPanel } from "./agent-panel";
 
 const nav = [
   { to:"/", label:"Overview", icon:LayoutDashboard, roles:["cfo","manager","customer","platform_admin"] },
@@ -85,8 +86,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
       <main className="mx-auto max-w-[1500px] p-4 pb-24 md:p-7 md:pb-24"><div key={`${role}-${location.pathname}`} className="page-enter">{children}</div></main>
     </div>
-    <button className="fixed bottom-5 right-5 z-20 flex h-12 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-lift transition-transform hover:-translate-y-0.5" title="Agent arrives in phase two">
-      <CircleDollarSign size={19} /> <span className="hidden sm:inline">Ask CashPilot</span>
-    </button>
+    <AgentPanel/>
   </div>;
 }
