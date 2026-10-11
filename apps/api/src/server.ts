@@ -238,7 +238,39 @@ app.get(
     );
     const cashflow =
       a.role === "customer"
-        ? []
+        ? await query(
+            `WITH months AS (
+              SELECT generate_series(
+                date_trunc('month', CURRENT_DATE) - interval '5 months',
+                date_trunc('month', CURRENT_DATE),
+                interval '1 month'
+              )::date AS month_start
+            ), invoice_months AS (
+              SELECT date_trunc('month', issue_date)::date AS month_start,
+                sum(amount)::float AS billed
+              FROM invoices
+              WHERE tenant_id=$1 AND customer_id=$2
+                AND issue_date >= date_trunc('month', CURRENT_DATE) - interval '5 months'
+              GROUP BY 1
+            ), payment_months AS (
+              SELECT date_trunc('month', paid_at)::date AS month_start,
+                sum(amount)::float AS paid
+              FROM payments
+              WHERE tenant_id=$1 AND customer_id=$2 AND status='settled'
+                AND paid_at >= date_trunc('month', CURRENT_DATE) - interval '5 months'
+              GROUP BY 1
+            )
+            SELECT to_char(m.month_start,'Mon') AS label,
+              COALESCE(i.billed,0)::float AS inflow,
+              COALESCE(p.paid,0)::float AS outflow,
+              sum(COALESCE(i.billed,0)-COALESCE(p.paid,0))
+                OVER (ORDER BY m.month_start)::float AS forecast
+            FROM months m
+            LEFT JOIN invoice_months i USING (month_start)
+            LEFT JOIN payment_months p USING (month_start)
+            ORDER BY m.month_start`,
+            [a.tenantId, a.customerId],
+          )
         : await query(
             `SELECT to_char(month_start,'Mon') AS label, inflow::float, outflow::float, forecast::float
     FROM cashflow_months WHERE tenant_id=$1 ORDER BY month_start`,

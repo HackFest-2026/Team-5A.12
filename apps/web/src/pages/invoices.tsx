@@ -89,7 +89,7 @@ export function InvoicesPage() {
   const requestedStatus = searchParams.get("status") ?? "all";
   const status = statuses.includes(requestedStatus) ? requestedStatus : "all";
   const creating = searchParams.get("modal") === "create-invoice";
-  const [selected, setSelected] = useState("");
+  const selected = searchParams.get("invoice") ?? "";
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const setFilter = (key: "search" | "status", value: string) => {
@@ -102,6 +102,12 @@ export function InvoicesPage() {
     const next = new URLSearchParams(searchParams);
     if (open) next.set("modal", "create-invoice");
     else next.delete("modal");
+    setSearchParams(next, { replace: true });
+  };
+  const setSelected = (invoiceId: string) => {
+    const next = new URLSearchParams(searchParams);
+    if (invoiceId) next.set("invoice", invoiceId);
+    else next.delete("invoice");
     setSearchParams(next, { replace: true });
   };
   const { data, error, loading, reload } = useApi<Invoice[]>("/api/invoices");
@@ -128,7 +134,7 @@ export function InvoicesPage() {
         },
       }),
     );
-  }, [creating, filtered.length, search, status]);
+  }, [creating, filtered.length, search, selected, status]);
   const remind = async (invoice: Invoice) => {
     setBusy(invoice.id);
     setNotice("");

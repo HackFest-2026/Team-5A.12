@@ -252,7 +252,12 @@ export function DashboardPage() {
             <span
               className={`inline-flex items-center ${inflowDelta >= 0 ? "text-brand" : "text-coral"}`}
             >
-              <ArrowUpRight size={13} /> {Math.abs(inflowDelta)}% latest inflow
+              {inflowDelta >= 0 ? (
+                <ArrowUpRight size={13} />
+              ) : (
+                <ArrowDownRight size={13} />
+              )}{" "}
+              {Math.abs(inflowDelta)}% latest {customer ? "billing" : "inflow"}{" "}
               change
             </span>
           }
@@ -290,7 +295,9 @@ export function DashboardPage() {
                 {customer ? "Account balance" : "Cash movement"}
               </h2>
               <p className="mt-1 text-xs text-muted">
-                Six-month inflow, outflow and projected position
+                {customer
+                  ? "Six-month billing and payment activity"
+                  : "Six-month inflow, outflow and projected position"}
               </p>
             </div>
             <Badge tone="green">Live ledger</Badge>
@@ -321,7 +328,16 @@ export function DashboardPage() {
                   tickFormatter={(v) => `${v / 100000}L`}
                 />
                 <Tooltip
-                  formatter={(value) => money(Number(value), true)}
+                  formatter={(value, name) => [
+                    money(Number(value), true),
+                    customer
+                      ? name === "inflow"
+                        ? "Billed"
+                        : "Paid"
+                      : name === "inflow"
+                        ? "Inflow"
+                        : "Outflow",
+                  ]}
                   contentStyle={{
                     border: "1px solid #dfe3dc",
                     borderRadius: 12,

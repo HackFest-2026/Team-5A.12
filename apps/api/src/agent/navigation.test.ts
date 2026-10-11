@@ -49,8 +49,9 @@ test("opens other registered product forms without feature-specific routing code
   );
 });
 
-test("sends data-bearing workflow requests to the model instead of dropping fields", () => {
-  assert.equal(isDirectAgentUiIntent("Record a payment"), true);
+test("sends every write workflow request to the language model", () => {
+  assert.equal(isDirectAgentUiIntent("Record a payment"), false);
+  assert.equal(isDirectAgentUiIntent("Create an invoice"), false);
   assert.equal(
     isDirectAgentUiIntent(
       "Record payment amount 400 against INV-2048 via UPI, reference PAY-400",

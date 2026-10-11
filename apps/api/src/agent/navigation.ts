@@ -70,17 +70,10 @@ export function isDirectAgentUiIntent(messageInput: string) {
   const hasExplicitAction = agentCatalog.uiActions.some(
     (action) => scoreAction(message, action) >= 10,
   );
-  const hasLikelyFormData =
-    /(?:\bINV-\d+\b|\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|₹|\b(?:amount|due|reference|ref|via|email|company|customer|contact|terms|credit|score)\s+(?:is|of|:)?\s*[^\s]+)/i.test(
-      messageInput,
-    );
   const hasPage = agentCatalog.pages.some(
     (page) => scorePage(message, page) > 0,
   );
-  return (
-    (hasExplicitAction && !hasLikelyFormData) ||
-    (navigationIntent.test(messageInput) && hasPage && !hasLikelyFormData)
-  );
+  return !hasExplicitAction && navigationIntent.test(messageInput) && hasPage;
 }
 
 function invoiceRoute(message: string, route: string) {
