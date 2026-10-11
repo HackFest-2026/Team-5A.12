@@ -120,7 +120,7 @@ export function LoginPage() {
               </div>
             </label>
             {error && <div className="border-l-2 border-coral bg-coral-soft px-3 py-2.5 text-sm font-semibold text-red-700">{error}</div>}
-            <Button className="h-11 w-full" variant="default" disabled={busy}>
+            <Button type="submit" className="h-11 w-full" variant="default" disabled={busy}>
               {busy ? "Signing in…" : <>Enter workspace <ArrowRight size={16} /></>}
             </Button>
           </form>

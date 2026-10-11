@@ -88,6 +88,13 @@ export type AgentActionResult = {
   undoUntil?: string | null;
 };
 
+export type AgentProgressEvent = {
+  type: "run_started" | "progress";
+  runId?: string;
+  node?: string;
+  detail?: string;
+};
+
 const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:4001";
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -107,6 +114,49 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return body;
 }
 
+async function streamAgentRun(
+  body: AgentRunRequest,
+  onProgress?: (event: AgentProgressEvent) => void,
+) {
+  const response = await fetch(`${API_URL}/api/agent/runs`, {
+    method: "POST",
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok || !response.body) {
+    const failure = await response.json().catch(() => ({}));
+    throw new Error(failure.error ?? "Agent stream failed");
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let result: AgentRunResponse | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    buffer += decoder.decode(value, { stream: !done });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      const dataLine = frame
+        .split("\n")
+        .find((line) => line.startsWith("data: "));
+      if (!dataLine) continue;
+      const event = JSON.parse(dataLine.slice(6));
+      if (event.type === "result") result = event.data;
+      else if (event.type === "error")
+        throw new Error(event.error ?? "Agent stream failed");
+      else onProgress?.(event as AgentProgressEvent);
+    }
+    if (done) break;
+  }
+  if (!result) throw new Error("Agent stream ended without a result.");
+  return result;
+}
+
 export const api = {
   get: <T>(path: string, _role?: Role) => request<T>(path),
   post: <T>(path: string, _role?: Role, body?: unknown) =>
@@ -122,4 +172,5 @@ export const api = {
   me: () => request<SessionUser>("/api/auth/me"),
   logout: () =>
     request<{ ok: boolean }>("/api/auth/logout", { method: "POST" }),
+  streamAgentRun,
 };

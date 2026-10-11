@@ -50,12 +50,12 @@ UI state contract: `/invoices?status=overdue&customer=c1&sort=due_date:asc&from=
 
 Implement domain tools in TypeScript with Zod input/output schemas. The model receives only tools allowed for the current actor. Tools call shared service functions that enforce tenant/customer scope and permissions; the model never gets a raw database connection, arbitrary SQL, or a generic HTTP fetch tool.
 
-| Family | First tools | Notes |
-| --- | --- | --- |
-| Navigation | `find_page`, `set_page_state`, `open_record` | Returns UI commands; browser acknowledges applied state. |
-| Read | `get_dashboard`, `list_invoices`, `get_invoice`, `get_customer`, `list_payments`, `get_cashflow`, `list_disputes`, `list_approvals` | Parameterized, scoped, paginated. |
-| Analysis | `compare_periods`, `explain_cash_gap`, `rank_collection_risk`, `simulate_payment_delay` | Deterministic calculations with source IDs and definitions. |
-| Write | `create_invoice`, `update_invoice`, `record_payment`, `send_reminder`, `review_dispute`, `decide_approval`, tenant/user actions | Same business rules and audit as the UI; confirmation where needed. |
+| Family     | First tools                                                                                                                         | Notes                                                               |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Navigation | `find_page`, `set_page_state`, `open_record`                                                                                        | Returns UI commands; browser acknowledges applied state.            |
+| Read       | `get_dashboard`, `list_invoices`, `get_invoice`, `get_customer`, `list_payments`, `get_cashflow`, `list_disputes`, `list_approvals` | Parameterized, scoped, paginated.                                   |
+| Analysis   | `compare_periods`, `explain_cash_gap`, `rank_collection_risk`, `simulate_payment_delay`                                             | Deterministic calculations with source IDs and definitions.         |
+| Write      | `create_invoice`, `update_invoice`, `record_payment`, `send_reminder`, `review_dispute`, `decide_approval`, tenant/user actions     | Same business rules and audit as the UI; confirmation where needed. |
 
 Example evidence object: `{sourceType:"invoice", sourceId:"i1", field:"balance", value:1060000, observedAt:"...", route:"/invoices?..."}`. Every numeric claim should carry supporting evidence IDs and a reproducible calculation. Answers distinguish facts from forecasts and proposed actions.
 
@@ -76,9 +76,9 @@ If a user types a password, API key, or similar secret in chat: detect and redac
 
 ## Runtime and stack
 
-Keep the agent inside the existing TypeScript/Express service for the hackathon; extract `services/` so the UI API and agent share domain rules. Use `@langchain/langgraph` for bounded multi-step state, pause/resume, and confirmation, with a PostgreSQL checkpointer. Call OpenRouter from the server through one provider adapter; keep its API key only in server environment variables. Pin and test a tool-capable, structured-output model in `OPENROUTER_MODEL`; add a faster model only if benchmarks justify it. OpenRouter supports tool calls and JSON Schema outputs for compatible models, so validate model capabilities during startup/evaluation.
+The agent runs inside the TypeScript/Express service. `@langchain/langgraph` now owns the bounded model → tool → approval → finalize workflow, and `@langchain/langgraph-checkpoint-postgres` persists every node boundary. Model-backed write proposals use a resumable LangGraph interrupt; the existing pending-action row remains the authoritative, payload-hashed authorization boundary. The no-model local fallback retains its direct confirmation path so the application can still perform its narrow degraded-mode workflow when OpenRouter is unavailable. OpenRouter is called from the server through one provider adapter, and its API key remains server-only. The tool-capable model is configured with `OPENROUTER_MODEL`.
 
-Use PostgreSQL for business data, catalog, run/checkpoint state, eval cases, and audit. Use `pgvector` later only if scale tests warrant it. Stream agent events through a `POST /api/agent/runs` fetch response (SSE format); add resume/confirm/form endpoints. Use OpenTelemetry traces plus a visible judge/debug trace. Keep traces free of credentials and avoid storing full sensitive business payloads.
+PostgreSQL stores business data, agent runs, evidence, pending actions, idempotency records, audit data, and LangGraph checkpoints. Use `pgvector` later only if measured retrieval quality warrants it. `POST /api/agent/runs` supports SSE over a streaming `fetch`: it emits `run_started`, per-node `progress`, and a final `result` event. Confirmation and rejection endpoints resume the saved graph with a `Command`; they remain separate authenticated HTTP commands so browser intent is never inferred from model text. OpenTelemetry remains a future observability enhancement.
 
 OpenRouter privacy controls should deny provider data collection for sensitive tenants and use zero-data-retention routing where available. Prompt caching can help repeated context but must never cache live finance answers or action requests as if they were immutable.
 
@@ -118,11 +118,11 @@ Use a held-out set with navigation, UI-state, analysis, action, missing-field, c
 
 ## Decisions and tradeoffs
 
-| Choice | Reason | Cost / trigger to revisit |
-| --- | --- | --- |
-| Shared service layer, typed tools | Reuses domain validation and permissions | Refactor current monolithic route handlers first. |
-| LangGraph for stateful runs | Durable approval and recovery | Keep simple route commands on a direct fast path. |
-| PostgreSQL metadata search first | Small operational footprint | Add pgvector when measured semantic misses justify it. |
-| Server-side calculations | Reproducible finance answers | Model can explain, but cannot be the ledger calculator. |
-| Secure forms for secrets | Keeps raw credentials out of model context | Typed chat secrets must be discarded/redacted and re-entered. |
-| One API process initially | Simple local deployment and low hop count | Split workers when sustained queue load or isolation needs demand it. |
+| Choice                            | Reason                                     | Cost / trigger to revisit                                             |
+| --------------------------------- | ------------------------------------------ | --------------------------------------------------------------------- |
+| Shared service layer, typed tools | Reuses domain validation and permissions   | Refactor current monolithic route handlers first.                     |
+| LangGraph for stateful runs       | Durable approval and recovery              | Keep simple route commands on a direct fast path.                     |
+| PostgreSQL metadata search first  | Small operational footprint                | Add pgvector when measured semantic misses justify it.                |
+| Server-side calculations          | Reproducible finance answers               | Model can explain, but cannot be the ledger calculator.               |
+| Secure forms for secrets          | Keeps raw credentials out of model context | Typed chat secrets must be discarded/redacted and re-entered.         |
+| One API process initially         | Simple local deployment and low hop count  | Split workers when sustained queue load or isolation needs demand it. |

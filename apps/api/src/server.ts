@@ -1450,16 +1450,36 @@ const agentRunSchema = z.object({
   }),
 });
 
-app.post(
-  "/api/agent/runs",
-  asyncRoute(async (req, res) => {
+app.post("/api/agent/runs", async (req, res, next) => {
+  const wantsStream = req.headers.accept?.includes("text/event-stream");
+  try {
     const a = actor(req);
     const input = agentRunSchema.parse(req.body);
-    res
-      .status(201)
-      .json(await runAgent(a, input.message, input.context, input.history));
-  }),
-);
+    if (!wantsStream) {
+      return res
+        .status(201)
+        .json(await runAgent(a, input.message, input.context, input.history));
+    }
+    res.status(200);
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    res.flushHeaders();
+    const send = (event: { type: string; [key: string]: unknown }) => {
+      res.write(`event: ${event.type}\n`);
+      res.write(`data: ${JSON.stringify(event)}\n\n`);
+    };
+    await runAgent(a, input.message, input.context, input.history, send);
+    res.end();
+  } catch (error) {
+    if (!wantsStream || !res.headersSent) return next(error);
+    const detail = error instanceof Error ? error.message : "Agent run failed.";
+    res.write("event: error\n");
+    res.write(`data: ${JSON.stringify({ type: "error", error: detail })}\n\n`);
+    res.end();
+  }
+});
 
 app.get(
   "/api/agent/signals",

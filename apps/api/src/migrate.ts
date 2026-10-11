@@ -2,6 +2,7 @@ import "./config.js";
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { db } from "./db.js";
 
 const migrationsDir = fileURLToPath(
@@ -42,6 +43,14 @@ async function migrate() {
       client.release();
     }
   }
+  const checkpointer = PostgresSaver.fromConnString(
+    process.env.DATABASE_URL ??
+      "postgres://cashpilot:cashpilot@localhost:5435/cashpilot",
+    { schema: "public" },
+  );
+  await checkpointer.setup();
+  await checkpointer.end();
+  console.log("LangGraph checkpoint schema is ready");
 }
 
 migrate()

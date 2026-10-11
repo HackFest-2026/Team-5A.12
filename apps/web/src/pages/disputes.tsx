@@ -173,7 +173,7 @@ export function DisputesPage() {
                 />
               </Field>
               <div className="mt-4 flex justify-end">
-                <Button variant="brand">Submit dispute</Button>
+                <Button type="submit" variant="brand">Submit dispute</Button>
               </div>
             </form>
           </CardContent>
@@ -354,7 +354,7 @@ function ReviewModal({
           <Button type="button" variant="ghost" onClick={close}>
             Cancel
           </Button>
-          <Button variant="brand" disabled={busy}>
+          <Button type="submit" variant="brand" disabled={busy}>
             {busy ? "Saving…" : "Save decision"}
           </Button>
         </div>

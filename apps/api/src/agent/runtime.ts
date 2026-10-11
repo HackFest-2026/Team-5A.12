@@ -1,4 +1,14 @@
 import { createHash, randomUUID } from "node:crypto";
+import {
+  Annotation,
+  Command,
+  END,
+  interrupt,
+  isInterrupted,
+  START,
+  StateGraph,
+} from "@langchain/langgraph";
+import { PostgresSaver } from "@langchain/langgraph-checkpoint-postgres";
 import { z } from "zod";
 import { db, query } from "../db.js";
 import { audit } from "../domain/audit.js";
@@ -63,6 +73,23 @@ type ChatMessage = {
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   name?: string;
+};
+export type AgentStreamEvent =
+  | { type: "run_started"; runId: string }
+  | { type: "progress"; node: string; detail: string }
+  | { type: "result"; data: AgentRunResult }
+  | { type: "error"; error: string };
+type AgentEventSink = (event: AgentStreamEvent) => void | Promise<void>;
+type AgentRunResult = {
+  id: string;
+  status: "completed" | "awaiting_confirmation";
+  mode: "deterministic_navigation" | "local_tools" | "openrouter_tools";
+  answer: string;
+  uiCommand: UiCommand | null;
+  pendingAction: PendingAction | null;
+  evidence: Array<Evidence & { observedAt: string }>;
+  trace: any[];
+  metrics: { durationMs: number; tokens: number };
 };
 export type AgentHistoryMessage = {
   role: "user" | "assistant";
@@ -1322,11 +1349,360 @@ async function localFallback(runId: string, message: string, actor: Actor) {
   return `I found ${rows.length} matching ${tool.replace("list_", "")}. Configure OPENROUTER_API_KEY for model-generated analysis; the live scoped records are available in the trace.`;
 }
 
+const AgentGraphState = Annotation.Root({
+  runId: Annotation<string>(),
+  actor: Annotation<Actor>(),
+  message: Annotation<string>(),
+  context: Annotation<AgentPageContext>(),
+  messages: Annotation<ChatMessage[]>(),
+  tools: Annotation<unknown[]>(),
+  pendingAction: Annotation<PendingAction | null>(),
+  uiCommand: Annotation<UiCommand | null>(),
+  suggestedRoute: Annotation<string | null>(),
+  answer: Annotation<string>(),
+  trace: Annotation<any[]>(),
+  tokens: Annotation<number>(),
+  turn: Annotation<number>(),
+  calls: Annotation<ToolCall[]>(),
+  actionResult: Annotation<any>(),
+});
+
+type AgentGraphValue = typeof AgentGraphState.State;
+
+async function modelNode(state: AgentGraphValue) {
+  const modelStarted = Date.now();
+  const response = await callOpenRouter(state.messages, state.tools);
+  const calls = response.message.tool_calls ?? [];
+  const usageTokens = Number((response.usage as any)?.total_tokens ?? 0);
+  const traceItem = {
+    step: "model",
+    outcome: calls.length ? "tool_calls" : "answer",
+    durationMs: Date.now() - modelStarted,
+    usage: response.usage,
+  };
+  await recordStep(state.runId, "model", traceItem.outcome, undefined, {
+    turn: state.turn,
+    usage: response.usage,
+  });
+  return {
+    messages: [...state.messages, response.message],
+    calls,
+    tokens: state.tokens + usageTokens,
+    turn: state.turn + 1,
+    trace: [...state.trace, traceItem],
+    answer: calls.length
+      ? state.answer
+      : normalizeInrCurrency(
+          response.message.content?.trim() || "I completed the analysis.",
+        ),
+  };
+}
+
+function routeAfterModel(state: AgentGraphValue) {
+  if (!state.calls.length) return "finalize";
+  return "execute_tools";
+}
+
+async function toolsNode(state: AgentGraphValue) {
+  let pendingAction = state.pendingAction;
+  let uiCommand = state.uiCommand;
+  let suggestedRoute = state.suggestedRoute;
+  const messages = [...state.messages];
+  const trace = [...state.trace];
+
+  for (const call of state.calls) {
+    const name = call.function.name;
+    let args: unknown;
+    try {
+      args = JSON.parse(call.function.arguments || "{}");
+    } catch {
+      throw new Error(`Invalid arguments returned for ${name}.`);
+    }
+    try {
+      const toolStarted = Date.now();
+      if (name === "open_ui" || name === "prefill_ui") {
+        const targetId = String((args as any)?.target ?? "");
+        const suppliedFields = (args as any)?.fields;
+        const prefill =
+          name === "prefill_ui"
+            ? prefillFields(targetId, suppliedFields, state.actor.role)
+            : null;
+        const target =
+          prefill?.action ?? findUiTarget(targetId, state.actor.role);
+        if (!target)
+          throw new Error(
+            "That interface is outside your role or does not exist.",
+          );
+        const page =
+          "id" in target && target.id.startsWith("page.")
+            ? target
+            : (catalogForRole(state.actor.role).find(
+                (page) =>
+                  target.route.startsWith(page.route) && page.route !== "/",
+              ) ??
+              catalogForRole(state.actor.role).find(
+                (page) => page.route === "/",
+              ));
+        uiCommand = {
+          type: "navigate",
+          pageId: page?.id ?? "page.overview",
+          route: target.route,
+          uiStateVersion: state.context.uiStateVersion + 1,
+          ...(prefill
+            ? {
+                form: {
+                  actionId: prefill.action.id,
+                  fields: prefill.fields,
+                  missingFields: prefill.missingFields,
+                },
+              }
+            : {}),
+        };
+        if (
+          prefill?.action.id === "action.invoice.create_with_customer" &&
+          prefill.missingFields.length === 0
+        )
+          pendingAction = await proposeWrite(
+            state.runId,
+            "create_customer_and_invoice",
+            prefill.fields,
+            state.actor,
+          );
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          name,
+          content: JSON.stringify({
+            opened: target.label,
+            route: target.route,
+            ...(prefill
+              ? {
+                  prefilled: prefill.fields,
+                  missingFields: prefill.missingFields,
+                  instruction: pendingAction
+                    ? "The combined customer and invoice write is ready for confirmation."
+                    : prefill.missingFields.length > 0
+                      ? `Ask only for: ${prefill.missingFields.join(", ")}. Defaults are already applied for every other field.`
+                      : "All required fields are present; prepare the supported write for confirmation.",
+                }
+              : {}),
+          }),
+        });
+        await recordStep(state.runId, "tool", "completed", name, {
+          target: target.id,
+          fieldCount: prefill ? Object.keys(prefill.fields).length : 0,
+        });
+        trace.push({
+          step: "tool",
+          tool: name,
+          outcome: "completed",
+          durationMs: Date.now() - toolStarted,
+        });
+      } else if (name in writePermissions) {
+        pendingAction = await proposeWrite(
+          state.runId,
+          name,
+          args,
+          state.actor,
+        );
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          name,
+          content: JSON.stringify({
+            requiresConfirmation: true,
+            pendingAction,
+          }),
+        });
+        await recordStep(state.runId, "tool", "awaiting_confirmation", name, {
+          actionId: pendingAction.id,
+        });
+        trace.push({
+          step: "tool",
+          tool: name,
+          outcome: "awaiting_confirmation",
+          durationMs: Date.now() - toolStarted,
+        });
+      } else {
+        const result = await executeReadTool(name, args, state.actor);
+        suggestedRoute =
+          (name === "get_invoice"
+            ? result.evidence[0]?.route
+            : routeForReadTool(name, args, state.message, state.context)) ??
+          suggestedRoute;
+        await persistEvidence(state.runId, result.evidence);
+        messages.push({
+          role: "tool",
+          tool_call_id: call.id,
+          name,
+          content: JSON.stringify({
+            data: result.data,
+            evidence: result.evidence,
+          }),
+        });
+        await recordStep(state.runId, "tool", "completed", name, {
+          evidenceCount: result.evidence.length,
+        });
+        trace.push({
+          step: "tool",
+          tool: name,
+          outcome: "completed",
+          durationMs: Date.now() - toolStarted,
+          evidenceCount: result.evidence.length,
+        });
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Tool failed";
+      messages.push({
+        role: "tool",
+        tool_call_id: call.id,
+        name,
+        content: JSON.stringify({ error: detail }),
+      });
+      await recordStep(state.runId, "tool", "failed", name, { error: detail });
+      trace.push({ step: "tool", tool: name, outcome: "failed" });
+    }
+  }
+
+  return {
+    messages,
+    trace,
+    pendingAction,
+    uiCommand,
+    suggestedRoute,
+    calls: [],
+    answer: pendingAction
+      ? `${pendingAction.summary}. Review the details and confirm before I execute it.`
+      : state.answer,
+  };
+}
+
+function routeAfterTools(state: AgentGraphValue) {
+  if (state.pendingAction) return "approval";
+  if (state.turn >= 5) return "limit";
+  return "model";
+}
+
+function limitNode() {
+  return {
+    answer:
+      "I reached the tool-step limit before completing the request. Please narrow the request.",
+  };
+}
+
+async function approvalNode(state: AgentGraphValue) {
+  if (!state.pendingAction) return {};
+  const decision = interrupt({
+    type: "action_confirmation",
+    actionId: state.pendingAction.id,
+    summary: state.pendingAction.summary,
+    expiresAt: state.pendingAction.expiresAt,
+  }) as { approved: boolean; actor: Actor };
+  if (!decision?.actor || decision.actor.id !== state.actor.id)
+    throw new Error("Confirmation identity does not match the graph owner.");
+  const actionResult = decision.approved
+    ? await executeConfirmedAction(decision.actor, state.pendingAction.id)
+    : await rejectPendingAction(decision.actor, state.pendingAction.id);
+  return { actionResult, answer: actionResult.answer, pendingAction: null };
+}
+
+function finalizeNode(state: AgentGraphValue) {
+  return {
+    uiCommand:
+      state.uiCommand ??
+      (state.pendingAction
+        ? null
+        : commandForRoute(
+            state.suggestedRoute,
+            state.actor.role,
+            state.context,
+          )),
+  };
+}
+
+let graphPromise: Promise<any> | null = null;
+
+async function getAgentGraph() {
+  if (!graphPromise) {
+    graphPromise = (async () => {
+      const connectionString =
+        process.env.DATABASE_URL ??
+        "postgres://cashpilot:cashpilot@localhost:5435/cashpilot";
+      const checkpointer = PostgresSaver.fromConnString(connectionString, {
+        schema: "public",
+      });
+      await checkpointer.setup();
+      return new StateGraph(AgentGraphState)
+        .addNode("model", modelNode)
+        .addNode("execute_tools", toolsNode)
+        .addNode("approval", approvalNode)
+        .addNode("limit", limitNode)
+        .addNode("finalize", finalizeNode)
+        .addEdge(START, "model")
+        .addConditionalEdges("model", routeAfterModel, [
+          "execute_tools",
+          "finalize",
+        ])
+        .addConditionalEdges("execute_tools", routeAfterTools, [
+          "model",
+          "approval",
+          "limit",
+        ])
+        .addEdge("approval", "finalize")
+        .addEdge("limit", "finalize")
+        .addEdge("finalize", END)
+        .compile({ checkpointer });
+    })().catch((error) => {
+      graphPromise = null;
+      throw error;
+    });
+  }
+  return graphPromise;
+}
+
+async function streamGraph(
+  input: AgentGraphValue | Command,
+  runId: string,
+  onEvent?: AgentEventSink,
+) {
+  const graph = await getAgentGraph();
+  const config = {
+    configurable: { thread_id: runId },
+    streamMode: "updates" as const,
+  };
+  const stream = await graph.stream(input as any, config);
+  for await (const update of stream) {
+    if (isInterrupted(update)) {
+      await onEvent?.({
+        type: "progress",
+        node: "approval",
+        detail: "Waiting for user confirmation",
+      });
+      continue;
+    }
+    const node = Object.keys(update as object)[0] ?? "graph";
+    await onEvent?.({
+      type: "progress",
+      node,
+      detail:
+        node === "model"
+          ? "Model planning completed"
+          : node === "execute_tools"
+            ? "Tool execution completed"
+            : node === "finalize"
+              ? "Run finalized"
+              : "Workflow updated",
+    });
+  }
+  return (await graph.getState(config)).values as AgentGraphValue;
+}
+
 export async function runAgent(
   actor: Actor,
   messageInput: string,
   context: AgentPageContext,
   historyInput: AgentHistoryMessage[] = [],
+  onEvent?: AgentEventSink,
 ) {
   const startedAt = Date.now();
   const message = scrubSecrets(messageInput);
@@ -1342,6 +1718,7 @@ export async function runAgent(
     ],
   );
   await recordMessage(runId, "user", message);
+  await onEvent?.({ type: "run_started", runId: `run-${runId}` });
   if (isDirectAgentUiIntent(message)) {
     const resolution = resolveNavigation(message, actor.role, context);
     await recordStep(runId, "resolver", resolution.kind, "find_page");
@@ -1350,7 +1727,7 @@ export async function runAgent(
       [runId, resolution.answer],
     );
     await recordMessage(runId, "assistant", resolution.answer);
-    return {
+    const result: AgentRunResult = {
       id: `run-${runId}`,
       status: "completed",
       mode: "deterministic_navigation",
@@ -1361,6 +1738,8 @@ export async function runAgent(
       trace: [{ step: "resolve_catalog", outcome: resolution.kind }],
       metrics: { durationMs: Date.now() - startedAt, tokens: 0 },
     };
+    await onEvent?.({ type: "result", data: result });
+    return result;
   }
   try {
     if (!process.env.OPENROUTER_API_KEY) {
@@ -1387,7 +1766,7 @@ export async function runAgent(
           [runId, answer],
         );
         await recordMessage(runId, "assistant", answer);
-        return {
+        const result: AgentRunResult = {
           id: `run-${runId}`,
           status: "awaiting_confirmation",
           mode: "local_tools",
@@ -1400,6 +1779,8 @@ export async function runAgent(
           ],
           metrics: { durationMs: Date.now() - startedAt, tokens: 0 },
         };
+        await onEvent?.({ type: "result", data: result });
+        return result;
       }
       const answer = await localFallback(runId, message, actor);
       await query(
@@ -1407,7 +1788,7 @@ export async function runAgent(
         [runId, answer],
       );
       await recordMessage(runId, "assistant", answer);
-      return {
+      const result: AgentRunResult = {
         id: `run-${runId}`,
         status: "completed",
         mode: "local_tools",
@@ -1422,6 +1803,8 @@ export async function runAgent(
         trace: [{ step: "tool_fallback", outcome: "completed" }],
         metrics: { durationMs: Date.now() - startedAt, tokens: 0 },
       };
+      await onEvent?.({ type: "result", data: result });
+      return result;
     }
     const tools = allowedTools(actor.role);
     const history = historyInput.slice(-6).map((item) => ({
@@ -1433,210 +1816,51 @@ export async function runAgent(
       ...history,
       { role: "user", content: message },
     ];
-    let pendingAction: PendingAction | null = null;
-    let uiCommand: UiCommand | null = null;
-    let suggestedRoute: string | null = null;
-    let answer = "";
-    const trace: any[] = [];
-    let tokens = 0;
-    for (let turn = 0; turn < 5; turn++) {
-      const modelStarted = Date.now();
-      const response = await callOpenRouter(messages, tools);
-      messages.push(response.message);
-      const calls = response.message.tool_calls ?? [];
-      tokens += Number((response.usage as any)?.total_tokens ?? 0);
-      trace.push({
-        step: "model",
-        outcome: calls.length ? "tool_calls" : "answer",
-        durationMs: Date.now() - modelStarted,
-        usage: response.usage,
-      });
-      await recordStep(
+    const graphState = await streamGraph(
+      {
         runId,
-        "model",
-        calls.length ? "tool_calls" : "answer",
-        undefined,
-        { turn, usage: response.usage },
-      );
-      if (!calls.length) {
-        answer = normalizeInrCurrency(
-          response.message.content?.trim() || "I completed the analysis.",
-        );
-        break;
-      }
-      for (const call of calls) {
-        const name = call.function.name;
-        let args: unknown;
-        try {
-          args = JSON.parse(call.function.arguments || "{}");
-        } catch {
-          throw new Error(`Invalid arguments returned for ${name}.`);
-        }
-        try {
-          const toolStarted = Date.now();
-          if (name === "open_ui" || name === "prefill_ui") {
-            const targetId = String((args as any)?.target ?? "");
-            const suppliedFields = (args as any)?.fields;
-            const prefill =
-              name === "prefill_ui"
-                ? prefillFields(targetId, suppliedFields, actor.role)
-                : null;
-            const target =
-              prefill?.action ?? findUiTarget(targetId, actor.role);
-            if (!target)
-              throw new Error(
-                "That interface is outside your role or does not exist.",
-              );
-            const page =
-              "id" in target && target.id.startsWith("page.")
-                ? target
-                : (catalogForRole(actor.role).find(
-                    (page) =>
-                      target.route.startsWith(page.route) && page.route !== "/",
-                  ) ??
-                  catalogForRole(actor.role).find(
-                    (page) => page.route === "/",
-                  ));
-            uiCommand = {
-              type: "navigate",
-              pageId: page?.id ?? "page.overview",
-              route: target.route,
-              uiStateVersion: context.uiStateVersion + 1,
-              ...(prefill
-                ? {
-                    form: {
-                      actionId: prefill.action.id,
-                      fields: prefill.fields,
-                      missingFields: prefill.missingFields,
-                    },
-                  }
-                : {}),
-            };
-            if (
-              prefill?.action.id === "action.invoice.create_with_customer" &&
-              prefill.missingFields.length === 0
-            ) {
-              pendingAction = await proposeWrite(
-                runId,
-                "create_customer_and_invoice",
-                prefill.fields,
-                actor,
-              );
-            }
-            messages.push({
-              role: "tool",
-              tool_call_id: call.id,
-              name,
-              content: JSON.stringify({
-                opened: target.label,
-                route: target.route,
-                ...(prefill
-                  ? {
-                      prefilled: prefill.fields,
-                      missingFields: prefill.missingFields,
-                      instruction: pendingAction
-                        ? "The combined customer and invoice write is ready for confirmation."
-                        : prefill.missingFields.length > 0
-                          ? `Ask only for: ${prefill.missingFields.join(", ")}. Defaults are already applied for every other field.`
-                          : "All required fields are present; prepare the supported write for confirmation.",
-                    }
-                  : {}),
-              }),
-            });
-            await recordStep(runId, "tool", "completed", name, {
-              target: target.id,
-              fieldCount: prefill ? Object.keys(prefill.fields).length : 0,
-            });
-            trace.push({
-              step: "tool",
-              tool: name,
-              outcome: "completed",
-              durationMs: Date.now() - toolStarted,
-            });
-          } else if (name in writePermissions) {
-            pendingAction = await proposeWrite(runId, name, args, actor);
-            const output = { requiresConfirmation: true, pendingAction };
-            messages.push({
-              role: "tool",
-              tool_call_id: call.id,
-              name,
-              content: JSON.stringify(output),
-            });
-            await recordStep(runId, "tool", "awaiting_confirmation", name, {
-              actionId: pendingAction.id,
-            });
-            trace.push({
-              step: "tool",
-              tool: name,
-              outcome: "awaiting_confirmation",
-              durationMs: Date.now() - toolStarted,
-            });
-          } else {
-            const result = await executeReadTool(name, args, actor);
-            suggestedRoute =
-              (name === "get_invoice"
-                ? result.evidence[0]?.route
-                : routeForReadTool(name, args, message, context)) ??
-              suggestedRoute;
-            await persistEvidence(runId, result.evidence);
-            messages.push({
-              role: "tool",
-              tool_call_id: call.id,
-              name,
-              content: JSON.stringify({
-                data: result.data,
-                evidence: result.evidence,
-              }),
-            });
-            await recordStep(runId, "tool", "completed", name, {
-              evidenceCount: result.evidence.length,
-            });
-            trace.push({
-              step: "tool",
-              tool: name,
-              outcome: "completed",
-              durationMs: Date.now() - toolStarted,
-              evidenceCount: result.evidence.length,
-            });
-          }
-        } catch (error) {
-          const detail = error instanceof Error ? error.message : "Tool failed";
-          messages.push({
-            role: "tool",
-            tool_call_id: call.id,
-            name,
-            content: JSON.stringify({ error: detail }),
-          });
-          await recordStep(runId, "tool", "failed", name, { error: detail });
-        }
-      }
-      if (pendingAction) {
-        answer = `${pendingAction.summary}. Review the details and confirm before I execute it.`;
-        break;
-      }
-    }
-    if (!answer)
-      answer =
-        "I reached the tool-step limit before completing the request. Please narrow the request.";
-    if (!uiCommand && !pendingAction)
-      uiCommand = commandForRoute(suggestedRoute, actor.role, context);
+        actor,
+        message,
+        context,
+        messages,
+        tools,
+        pendingAction: null,
+        uiCommand: null,
+        suggestedRoute: null,
+        answer: "",
+        trace: [],
+        tokens: 0,
+        turn: 0,
+        calls: [],
+        actionResult: null,
+      },
+      runId,
+      onEvent,
+    );
+    const pendingAction = graphState.pendingAction;
+    const answer = graphState.answer;
     const status = pendingAction ? "awaiting_confirmation" : "completed";
     await query(
       `UPDATE agent_runs SET status=$2,answer=$3,updated_at=now() WHERE id=$1`,
       [runId, status, answer],
     );
     await recordMessage(runId, "assistant", answer);
-    return {
+    const result: AgentRunResult = {
       id: `run-${runId}`,
       status,
       mode: "openrouter_tools",
       answer,
-      uiCommand,
+      uiCommand: graphState.uiCommand,
       pendingAction,
       evidence: await evidenceForRun(runId),
-      trace,
-      metrics: { durationMs: Date.now() - startedAt, tokens },
+      trace: graphState.trace,
+      metrics: {
+        durationMs: Date.now() - startedAt,
+        tokens: graphState.tokens,
+      },
     };
+    await onEvent?.({ type: "result", data: result });
+    return result;
   } catch (error) {
     const answer = error instanceof Error ? error.message : "Agent run failed.";
     await query(
@@ -1648,7 +1872,7 @@ export async function runAgent(
   }
 }
 
-export async function confirmAction(actor: Actor, actionId: string) {
+async function executeConfirmedAction(actor: Actor, actionId: string) {
   const [current] = await query<any>(
     `SELECT * FROM agent_pending_actions WHERE id=$1 AND user_id=$2`,
     [actionId, actor.id],
@@ -1845,7 +2069,7 @@ export async function undoAction(actor: Actor, actionId: string) {
   }
 }
 
-export async function rejectAction(actor: Actor, actionId: string) {
+async function rejectPendingAction(actor: Actor, actionId: string) {
   const [action] = await query<any>(
     `UPDATE agent_pending_actions SET status='rejected' WHERE id=$1 AND user_id=$2 AND status='pending' RETURNING run_id,summary`,
     [actionId, actor.id],
@@ -1861,6 +2085,44 @@ export async function rejectAction(actor: Actor, actionId: string) {
     status: "rejected",
     answer: `${action.summary} was not executed.`,
   };
+}
+
+export async function confirmAction(actor: Actor, actionId: string) {
+  const [action] = await query<any>(
+    `SELECT a.run_id,a.status,r.mode FROM agent_pending_actions a
+     JOIN agent_runs r ON r.id=a.run_id
+     WHERE a.id=$1 AND a.user_id=$2`,
+    [actionId, actor.id],
+  );
+  if (!action) throw new Error("This action is unavailable.");
+  if (action.mode !== "openrouter_tools" || action.status !== "pending")
+    return executeConfirmedAction(actor, actionId);
+  const state = await streamGraph(
+    new Command({ resume: { approved: true, actor } }),
+    action.run_id,
+  );
+  if (!state.actionResult)
+    throw new Error("The confirmation workflow did not produce a result.");
+  return state.actionResult;
+}
+
+export async function rejectAction(actor: Actor, actionId: string) {
+  const [action] = await query<any>(
+    `SELECT a.run_id,a.status,r.mode FROM agent_pending_actions a
+     JOIN agent_runs r ON r.id=a.run_id
+     WHERE a.id=$1 AND a.user_id=$2`,
+    [actionId, actor.id],
+  );
+  if (!action) throw new Error("This action is unavailable.");
+  if (action.mode !== "openrouter_tools" || action.status !== "pending")
+    return rejectPendingAction(actor, actionId);
+  const state = await streamGraph(
+    new Command({ resume: { approved: false, actor } }),
+    action.run_id,
+  );
+  if (!state.actionResult)
+    throw new Error("The rejection workflow did not produce a result.");
+  return state.actionResult;
 }
 
 export async function proactiveSignals(actor: Actor) {

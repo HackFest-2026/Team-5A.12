@@ -622,7 +622,7 @@ function InvoiceDetailModal({
               Close
             </Button>
             {(role === "cfo" || role === "manager") && (
-              <Button variant="brand" disabled={saving}>
+              <Button type="submit" variant="brand" disabled={saving}>
                 {saving ? "Saving…" : "Save changes"}
               </Button>
             )}
@@ -737,7 +737,7 @@ function CreateInvoiceModal({
           <Button type="button" variant="ghost" onClick={close}>
             Cancel
           </Button>
-          <Button variant="brand" disabled={saving}>
+          <Button type="submit" variant="brand" disabled={saving}>
             {saving ? "Creating…" : "Create invoice"}
           </Button>
         </div>

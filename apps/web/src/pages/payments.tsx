@@ -332,7 +332,7 @@ function PaymentCreate({
           <Button type="button" variant="ghost" onClick={close}>
             Cancel
           </Button>
-          <Button variant="brand" disabled={busy || !invoices.length}>
+          <Button type="submit" variant="brand" disabled={busy || !invoices.length}>
             {busy ? "Recording…" : "Record payment"}
           </Button>
         </div>

@@ -537,7 +537,7 @@ function CustomerForm({
         <Button type="button" variant="ghost" onClick={close}>
           Cancel
         </Button>
-        <Button variant="brand" disabled={busy}>
+        <Button type="submit" variant="brand" disabled={busy}>
           {busy ? "Saving…" : initial ? "Save changes" : "Create customer"}
         </Button>
       </div>

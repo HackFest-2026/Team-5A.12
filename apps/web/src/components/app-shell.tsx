@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useState, type CSSProperties, type ReactNode } from "react";
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -25,6 +25,7 @@ import type { Role } from "@/lib/api";
 import { cn, relativeDate } from "@/lib/utils";
 import { Button } from "./ui/button";
 import { AgentPanel } from "./agent-panel";
+import { SidebarProvider } from "./ui/sidebar";
 
 const nav = [
   {
@@ -184,7 +185,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
 
   return (
-    <div className="flex min-h-screen bg-canvas text-ink">
+    <SidebarProvider
+      defaultOpen
+      className="min-h-screen bg-canvas text-ink"
+      style={{ "--sidebar-width": "390px" } as CSSProperties}
+    >
       <div className="hidden md:sticky md:top-0 md:block md:h-screen">
         <Sidebar />
       </div>
@@ -348,6 +353,6 @@ export function AppShell({ children }: { children: ReactNode }) {
         </main>
       </div>
       <AgentPanel />
-    </div>
+    </SidebarProvider>
   );
 }

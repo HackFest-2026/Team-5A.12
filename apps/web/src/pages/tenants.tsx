@@ -405,7 +405,7 @@ export function TenantsPage() {
               />
             </Field>
             <div className="flex gap-2 md:col-span-2 xl:col-span-4">
-              <Button variant="brand" disabled={busy === "tenant"}>
+              <Button type="submit" variant="brand" disabled={busy === "tenant"}>
                 {busy === "tenant" ? "Provisioning…" : "Create workspace"}
               </Button>
               <Button
@@ -638,6 +638,7 @@ export function TenantsPage() {
                 </Field>
                 <div className="flex gap-2 sm:col-span-2">
                   <Button
+                    type="submit"
                     variant="brand"
                     size="sm"
                     disabled={busy === "tenant-profile"}
@@ -741,6 +742,7 @@ export function TenantsPage() {
                   </Field>
                   <div className="flex gap-2 md:col-span-2">
                     <Button
+                      type="submit"
                       variant="brand"
                       size="sm"
                       disabled={busy === "user"}

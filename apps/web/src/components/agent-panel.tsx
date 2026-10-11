@@ -28,6 +28,14 @@ import {
 } from "@/hooks/use-agent-prefill";
 import { Button } from "./ui/button";
 import { Input, Select } from "./ui/input";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarHeader,
+  SidebarRail,
+  useSidebar,
+} from "./ui/sidebar";
 
 const pageIds: Record<string, string> = {
   "/": "page.overview",
@@ -219,9 +227,10 @@ function displayPayloadValue(key: string, value: unknown) {
 }
 
 export function AgentPanel() {
-  const [open, setOpen] = useState(false);
+  const { isMobile, open, setOpen, openMobile, setOpenMobile } = useSidebar();
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
+  const [progressLabel, setProgressLabel] = useState("Checking live records…");
   const [uiStateVersion, setUiStateVersion] = useState(1);
   const [pendingAction, setPendingAction] = useState<AgentPendingAction | null>(
     null,
@@ -285,7 +294,8 @@ export function AgentPanel() {
       setContextDetail((event as CustomEvent<ContextDetail>).detail);
     const preparePrompt = (event: Event) => {
       const detail = (event as CustomEvent<{ prompt: string }>).detail;
-      setOpen(true);
+      if (isMobile) setOpenMobile(true);
+      else setOpen(true);
       setInput(detail.prompt);
       window.setTimeout(() => inputRef.current?.focus(), 50);
     };
@@ -295,12 +305,20 @@ export function AgentPanel() {
       window.removeEventListener("cashpilot:agent-context", updateContext);
       window.removeEventListener("cashpilot:agent-prompt", preparePrompt);
     };
-  }, []);
+  }, [isMobile, setOpen, setOpenMobile]);
 
   const show = () => {
-    setOpen(true);
+    if (isMobile) setOpenMobile(true);
+    else setOpen(true);
     window.setTimeout(() => inputRef.current?.focus(), 50);
   };
+
+  const hide = () => {
+    if (isMobile) setOpenMobile(false);
+    else setOpen(false);
+  };
+
+  const sidebarVisible = isMobile ? openMobile : open;
 
   const send = async (rawMessage: string, displayMessage?: string) => {
     const message = rawMessage.trim();
@@ -323,6 +341,7 @@ export function AgentPanel() {
       },
     ]);
     setBusy(true);
+    setProgressLabel("Starting agent workflow…");
     try {
       const payload: AgentRunRequest = {
         message,
@@ -336,10 +355,9 @@ export function AgentPanel() {
           uiStateVersion,
         },
       };
-      const result = await api.post<AgentRunResponse>(
-        "/api/agent/runs",
-        undefined,
+      const result = await api.streamAgentRun(
         payload,
+        (event) => event.detail && setProgressLabel(event.detail),
       );
       setMessages((items) => [
         ...items,
@@ -491,11 +509,14 @@ export function AgentPanel() {
 
   return (
     <>
-      <section
+      <Sidebar
+        side="right"
+        variant="floating"
+        collapsible="offcanvas"
         aria-label="CashPilot agent"
-        className={`${open ? "flex" : "hidden"} fixed inset-x-3 bottom-3 z-50 max-h-[min(720px,calc(100vh-1.5rem))] flex-col overflow-hidden rounded-[16px] border border-line bg-white shadow-lift sm:left-auto sm:right-5 sm:w-[430px] 2xl:sticky 2xl:inset-auto 2xl:top-0 2xl:z-20 2xl:flex 2xl:h-screen 2xl:max-h-screen 2xl:w-[390px] 2xl:shrink-0 2xl:rounded-none 2xl:border-y-0 2xl:border-r-0 2xl:shadow-none min-[1800px]:w-[420px]`}
+        className="z-40 md:[--sidebar-width:390px] min-[1800px]:[--sidebar-width:420px]"
       >
-        <header className="border-b border-line bg-white px-4 py-3.5 text-ink">
+        <SidebarHeader className="border-b border-line bg-white px-4 py-3.5 text-ink">
           <div className="flex items-center gap-3">
             <span className="grid h-9 w-9 place-items-center rounded-lg bg-brand-soft text-brand-dark">
               <Sparkles size={17} />
@@ -510,8 +531,7 @@ export function AgentPanel() {
               aria-label="Close agent"
               variant="ghost"
               size="icon"
-              className="2xl:hidden"
-              onClick={() => setOpen(false)}
+              onClick={hide}
             >
               <X size={18} />
             </Button>
@@ -520,8 +540,8 @@ export function AgentPanel() {
             <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
             <span className="truncate">{contextLabel}</span>
           </div>
-        </header>
-        <div className="scrollbar-none min-h-64 flex-1 space-y-3 overscroll-contain overflow-y-auto bg-[#fbfaf6] p-4">
+        </SidebarHeader>
+        <SidebarContent className="scrollbar-none min-h-64 flex-1 space-y-3 overscroll-contain overflow-y-auto bg-[#fbfaf6] p-4">
           {messages.length === 1 &&
             signals.map((signal) => (
               <button
@@ -550,7 +570,7 @@ export function AgentPanel() {
                 className={`max-w-[92%] ${message.author === "user" ? "" : "w-full"}`}
               >
                 <div
-                className={`whitespace-pre-wrap rounded-xl px-3.5 py-2.5 text-sm leading-5 ${message.author === "user" ? "ml-auto w-fit rounded-br-sm bg-ink text-white" : "rounded-bl-sm border border-line bg-white text-ink"}`}
+                  className={`whitespace-pre-wrap rounded-xl px-3.5 py-2.5 text-sm leading-5 ${message.author === "user" ? "ml-auto w-fit rounded-br-sm bg-ink text-white" : "rounded-bl-sm border border-line bg-white text-ink"}`}
                 >
                   {message.text}
                 </div>
@@ -617,7 +637,7 @@ export function AgentPanel() {
             <div className="flex justify-start">
               <div className="flex items-center gap-2 rounded-2xl rounded-bl-md border border-line bg-white px-3.5 py-2.5 text-xs text-muted">
                 <LoaderCircle className="animate-spin" size={14} />
-                Checking live records…
+                {progressLabel}
               </div>
             </div>
           )}
@@ -758,7 +778,7 @@ export function AgentPanel() {
                 >
                   Cancel
                 </Button>
-                <Button size="sm" variant="brand" disabled={busy}>
+                <Button type="submit" size="sm" variant="brand" disabled={busy}>
                   Continue
                 </Button>
               </div>
@@ -784,51 +804,55 @@ export function AgentPanel() {
               </button>
             </div>
           )}
-        </div>
-        {messages.length === 1 && (
-          <div className="flex gap-2 overflow-x-auto border-t border-line bg-white px-4 pt-3">
-            {suggestions.map((suggestion) => (
-              <button
-                key={suggestion}
-                onClick={() => void send(suggestion)}
-                className="shrink-0 rounded-full border border-line bg-canvas px-3 py-1.5 text-[11px] font-semibold text-muted hover:border-brand/30 hover:text-brand-dark"
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        )}
-        <form
-          className="flex gap-2 bg-white p-4"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void send(input);
-          }}
-        >
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            disabled={busy || Boolean(pendingAction)}
-            maxLength={500}
-            placeholder={
-              pendingAction
-                ? "Confirm or reject the proposed action"
-                : "Ask, investigate, or take action…"
-            }
-            className="ui-control min-w-0 flex-1 rounded-lg border border-line bg-canvas px-3.5 text-sm outline-none focus:border-brand/40 focus:ring-2 focus:ring-brand/10"
-          />
-          <Button
-            aria-label="Send request"
-            variant="brand"
-            size="icon"
-            disabled={busy || !input.trim()}
+        </SidebarContent>
+        <SidebarFooter className="gap-0 border-t border-line bg-white p-0">
+          {messages.length === 1 && (
+            <div className="flex gap-2 overflow-x-auto px-4 pt-3">
+              {suggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  onClick={() => void send(suggestion)}
+                  className="shrink-0 rounded-full border border-line bg-canvas px-3 py-1.5 text-[11px] font-semibold text-muted hover:border-brand/30 hover:text-brand-dark"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+          <form
+            className="flex gap-2 p-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void send(input);
+            }}
           >
-            <CornerDownLeft size={17} />
-          </Button>
-        </form>
-      </section>
-      {!open && (
+            <input
+              ref={inputRef}
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              disabled={busy || Boolean(pendingAction)}
+              maxLength={500}
+              placeholder={
+                pendingAction
+                  ? "Confirm or reject the proposed action"
+                  : "Ask, investigate, or take action…"
+              }
+              className="ui-control min-w-0 flex-1 rounded-lg border border-line bg-canvas px-3.5 text-sm outline-none focus:border-brand/40 focus:ring-2 focus:ring-brand/10"
+            />
+            <Button
+              type="submit"
+              aria-label="Send request"
+              variant="brand"
+              size="icon"
+              disabled={busy || !input.trim()}
+            >
+              <CornerDownLeft size={17} />
+            </Button>
+          </form>
+        </SidebarFooter>
+        <SidebarRail />
+      </Sidebar>
+      {!sidebarVisible && (
         <button
           onClick={show}
           className="ui-button ui-button-brand fixed bottom-5 right-5 z-20 flex h-12 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-lift 2xl:hidden"

@@ -37,6 +37,8 @@ Authentication uses revocable, HTTP-only database sessions. Roles and tenant sco
 CashPilot now includes a persistent, tool-using finance agent:
 
 - OpenRouter planning with role-scoped read and write tools.
+- LangGraph state-machine orchestration with PostgreSQL checkpoints and resumable human-approval interrupts.
+- POST-based SSE streaming for run-start, node-progress, and final-result events.
 - Live dashboard, invoice, customer, payment, cash-flow, dispute, approval, audit, and tenant retrieval.
 - Persistent runs, steps, evidence, pending actions, and idempotency keys.
 - Confirm-before-execute writes for invoice creation/update, reminders, payments, disputes, and approvals.
