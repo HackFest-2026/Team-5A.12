@@ -35,19 +35,19 @@ export function Modal({
       role="dialog"
       aria-modal="true"
       aria-label={title}
-      className="fixed inset-y-0 left-0 right-0 z-[70] flex items-center justify-center overflow-hidden bg-ink/40 p-3 backdrop-blur-sm sm:p-6 lg:right-[390px] xl:right-[420px]"
+      className="fixed inset-y-0 left-0 right-0 z-[70] flex items-center justify-center overflow-hidden bg-ink/30 p-3 backdrop-blur-[2px] sm:p-6 2xl:right-[390px] min-[1800px]:right-[420px]"
       onMouseDown={close}
     >
       <section
         className={cn(
-          "flex max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-[22px] border border-line bg-white shadow-lift animate-[enter_180ms_ease-out] sm:max-h-[calc(100dvh-3rem)]",
+          "flex max-h-[calc(100dvh-1.5rem)] w-full flex-col overflow-hidden rounded-[14px] border border-line bg-white shadow-lift animate-[enter_180ms_ease-out] sm:max-h-[calc(100dvh-3rem)]",
           wide ? "max-w-3xl" : "max-w-xl",
         )}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <header className="flex shrink-0 items-start justify-between border-b border-line bg-white/95 p-5 backdrop-blur-xl sm:px-6">
           <div>
-            <h2 className="text-xl font-extrabold tracking-[-.035em]">
+            <h2 className="font-display text-2xl tracking-[-.035em]">
               {title}
             </h2>
             {detail && <p className="mt-1 text-sm text-muted">{detail}</p>}

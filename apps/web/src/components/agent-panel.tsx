@@ -493,16 +493,16 @@ export function AgentPanel() {
     <>
       <section
         aria-label="CashPilot agent"
-        className={`${open ? "flex" : "hidden"} fixed inset-x-3 bottom-3 z-50 max-h-[min(720px,calc(100vh-1.5rem))] flex-col overflow-hidden rounded-[22px] border border-line bg-white shadow-lift sm:left-auto sm:right-5 sm:w-[430px] lg:sticky lg:inset-auto lg:top-0 lg:z-20 lg:flex lg:h-screen lg:max-h-screen lg:w-[390px] lg:shrink-0 lg:rounded-none lg:border-y-0 lg:border-r-0 lg:shadow-none xl:w-[420px]`}
+        className={`${open ? "flex" : "hidden"} fixed inset-x-3 bottom-3 z-50 max-h-[min(720px,calc(100vh-1.5rem))] flex-col overflow-hidden rounded-[16px] border border-line bg-white shadow-lift sm:left-auto sm:right-5 sm:w-[430px] 2xl:sticky 2xl:inset-auto 2xl:top-0 2xl:z-20 2xl:flex 2xl:h-screen 2xl:max-h-screen 2xl:w-[390px] 2xl:shrink-0 2xl:rounded-none 2xl:border-y-0 2xl:border-r-0 2xl:shadow-none min-[1800px]:w-[420px]`}
       >
-        <header className="border-b border-line bg-ink px-4 py-3.5 text-white">
+        <header className="border-b border-line bg-white px-4 py-3.5 text-ink">
           <div className="flex items-center gap-3">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-brand">
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-brand-soft text-brand-dark">
               <Sparkles size={17} />
             </span>
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold">CashPilot agent</p>
-              <p className="text-[10px] text-white/55">
+              <p className="text-[10px] text-muted">
                 Live tools · confirmed writes
               </p>
             </div>
@@ -510,18 +510,18 @@ export function AgentPanel() {
               aria-label="Close agent"
               variant="ghost"
               size="icon"
-              className="text-white hover:bg-white/10 lg:hidden"
+              className="2xl:hidden"
               onClick={() => setOpen(false)}
             >
               <X size={18} />
             </Button>
           </div>
-          <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/10 px-2.5 py-1 text-[10px] font-semibold text-white/75">
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" />
+          <div className="mt-2 inline-flex max-w-full items-center gap-1.5 rounded-full bg-canvas px-2.5 py-1 text-[10px] font-semibold text-muted">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
             <span className="truncate">{contextLabel}</span>
           </div>
         </header>
-        <div className="scrollbar-none min-h-64 flex-1 space-y-3 overflow-y-auto bg-canvas/60 p-4">
+        <div className="scrollbar-none min-h-64 flex-1 space-y-3 overscroll-contain overflow-y-auto bg-[#fbfaf6] p-4">
           {messages.length === 1 &&
             signals.map((signal) => (
               <button
@@ -550,7 +550,7 @@ export function AgentPanel() {
                 className={`max-w-[92%] ${message.author === "user" ? "" : "w-full"}`}
               >
                 <div
-                  className={`whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm leading-5 ${message.author === "user" ? "ml-auto w-fit rounded-br-md bg-ink text-white" : "rounded-bl-md border border-line bg-white text-ink"}`}
+                className={`whitespace-pre-wrap rounded-xl px-3.5 py-2.5 text-sm leading-5 ${message.author === "user" ? "ml-auto w-fit rounded-br-sm bg-ink text-white" : "rounded-bl-sm border border-line bg-white text-ink"}`}
                 >
                   {message.text}
                 </div>
@@ -816,7 +816,7 @@ export function AgentPanel() {
                 ? "Confirm or reject the proposed action"
                 : "Ask, investigate, or take action…"
             }
-            className="min-w-0 flex-1 rounded-xl border border-line bg-canvas px-3.5 text-sm outline-none focus:border-brand/40 focus:ring-2 focus:ring-brand/10"
+            className="ui-control min-w-0 flex-1 rounded-lg border border-line bg-canvas px-3.5 text-sm outline-none focus:border-brand/40 focus:ring-2 focus:ring-brand/10"
           />
           <Button
             aria-label="Send request"
@@ -831,7 +831,7 @@ export function AgentPanel() {
       {!open && (
         <button
           onClick={show}
-          className="fixed bottom-5 right-5 z-20 flex h-12 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-lift transition-transform hover:-translate-y-0.5 lg:hidden"
+          className="ui-button ui-button-brand fixed bottom-5 right-5 z-20 flex h-12 items-center gap-2 rounded-full bg-brand px-4 text-sm font-bold text-white shadow-lift 2xl:hidden"
         >
           <Bot size={19} />
           <span className="hidden sm:inline">Ask CashPilot</span>

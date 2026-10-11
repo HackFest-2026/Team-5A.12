@@ -12,9 +12,9 @@ export function ErrorState({ message, retry }: { message: string; retry?: () => 
   </div>;
 }
 export function Stat({ label, value, note, icon }: { label: string; value: ReactNode; note: ReactNode; icon?: ReactNode }) {
-  return <div className="rounded-panel border border-line bg-white p-5 shadow-panel">
-    <div className="flex items-center justify-between text-xs font-semibold text-muted"><span>{label}</span>{icon}</div>
-    <div className="tabular mt-3 text-[27px] font-bold tracking-[-.04em] text-ink">{value}</div>
-    <div className="mt-2 text-xs text-muted">{note}</div>
+  return <div className="rounded-panel border border-line bg-white/65 px-5 py-4">
+    <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[.11em] text-muted"><span>{label}</span><span className="text-brand">{icon}</span></div>
+    <div className="tabular mt-4 font-display text-[31px] leading-none tracking-[-.035em] text-ink">{value}</div>
+    <div className="mt-3 text-xs text-muted">{note}</div>
   </div>;
 }

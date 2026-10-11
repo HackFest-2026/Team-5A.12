@@ -2,18 +2,37 @@
 @tailwind components;
 @tailwind utilities;
 
-:root { color: #18201c; background: #f4f5ef; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-synthesis: none; }
+:root { color: #25231f; background: #f8f5ee; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; font-synthesis: none; }
 * { box-sizing: border-box; }
-body { margin: 0; min-width: 320px; min-height: 100vh; background: #f4f5ef; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: #f8f5ee; }
 button, input, select, textarea { font: inherit; }
 button { cursor: pointer; }
-::selection { background: #cde4d8; color: #0d4936; }
+::selection { background: #d9e1ff; color: #2d438f; }
 .tabular { font-variant-numeric: tabular-nums; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 .scrollbar-none { scrollbar-width: none; }
 
-@keyframes enter { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
-.page-enter { animation: enter 260ms ease-out both; }
+@layer base {
+  :focus-visible { outline: 2px solid #4263c7; outline-offset: 2px; }
+  table th { font-weight: 700; }
+}
+
+@layer components {
+  .ui-button { transition: color 150ms ease-out, background-color 150ms ease-out, border-color 150ms ease-out, box-shadow 150ms ease-out, transform 150ms ease-out; }
+  .ui-button:enabled:active { transform: scale(.96); }
+  .ui-control { transition: border-color 150ms ease-out, box-shadow 150ms ease-out, background-color 150ms ease-out; }
+  @media (hover: hover) and (pointer: fine) {
+    .ui-button-default:hover { background: #35322d; }
+    .ui-button-brand:hover { background: #2d438f; }
+    .ui-button-outline:hover { border-color: #bfb7ab; background: #fbfaf6; }
+    .ui-button-ghost:hover { background: rgba(37,35,31,.055); color: #25231f; }
+    .ui-button-danger:hover { background: #ad433a; }
+    .interactive-row:hover { background: rgba(248,245,238,.8); }
+  }
+}
+
+@keyframes enter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.page-enter { animation: enter 220ms ease-out both; }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; transition-duration: .01ms !important; }

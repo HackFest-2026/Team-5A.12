@@ -226,9 +226,9 @@ export function DashboardPage() {
         }
       />
       {!customer && priority && (
-        <Card className="mb-5 border-coral/20 bg-gradient-to-r from-coral-soft/70 to-white p-4">
+        <Card className="mb-5 border-l-2 border-l-coral bg-white/70 p-4">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-coral shadow-sm">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-coral-soft text-coral">
               <Sparkles size={18} />
             </span>
             <div className="flex-1">
@@ -310,21 +310,21 @@ export function DashboardPage() {
               >
                 <defs>
                   <linearGradient id="inflow" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#176b50" stopOpacity={0.24} />
-                    <stop offset="100%" stopColor="#176b50" stopOpacity={0} />
+                    <stop offset="0%" stopColor="#4263c7" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="#4263c7" stopOpacity={0} />
                   </linearGradient>
                 </defs>
-                <CartesianGrid stroke="#e8ebe5" vertical={false} />
+                <CartesianGrid stroke="#e5dfd5" vertical={false} />
                 <XAxis
                   dataKey="label"
                   tickLine={false}
                   axisLine={false}
-                  tick={{ fontSize: 11, fill: "#6d756f" }}
+                  tick={{ fontSize: 11, fill: "#756f66" }}
                 />
                 <YAxis
                   tickLine={false}
                   axisLine={false}
-                  tick={{ fontSize: 10, fill: "#6d756f" }}
+                  tick={{ fontSize: 10, fill: "#756f66" }}
                   tickFormatter={(v) => `${v / 100000}L`}
                 />
                 <Tooltip
@@ -339,15 +339,15 @@ export function DashboardPage() {
                         : "Outflow",
                   ]}
                   contentStyle={{
-                    border: "1px solid #dfe3dc",
-                    borderRadius: 12,
-                    boxShadow: "0 12px 32px rgba(24,32,28,.08)",
+                    border: "1px solid #e5dfd5",
+                    borderRadius: 8,
+                    boxShadow: "0 16px 36px rgba(37,35,31,.1)",
                   }}
                 />
                 <Area
                   type="monotone"
                   dataKey="inflow"
-                  stroke="#176b50"
+                  stroke="#4263c7"
                   strokeWidth={2.5}
                   fill="url(#inflow)"
                 />
@@ -384,7 +384,7 @@ export function DashboardPage() {
               data.risks.map((risk) => (
                 <div
                   key={risk.id}
-                  className="px-5 py-4 transition-colors hover:bg-canvas/60"
+                  className="interactive-row px-5 py-4 transition-colors"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>

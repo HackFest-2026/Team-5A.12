@@ -130,13 +130,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   const items = nav.filter((item) => item.roles.includes(role));
 
   const Sidebar = () => (
-    <aside className="flex h-full w-[252px] shrink-0 flex-col overflow-y-auto border-r border-line bg-[#fafbf7] px-3 py-4">
+    <aside className="flex h-full w-[232px] shrink-0 flex-col overflow-y-auto border-r border-line bg-[#fbf9f4] px-3 py-5">
       <div className="flex h-12 items-center gap-3 px-2">
-        <div className="grid h-9 w-9 place-items-center rounded-xl bg-ink text-white">
+        <div className="grid h-9 w-9 place-items-center rounded-lg bg-brand text-white">
           <BadgeIndianRupee size={20} strokeWidth={2.2} />
         </div>
         <div>
-          <div className="text-[17px] font-extrabold tracking-[-.04em]">
+          <div className="font-display text-[20px] leading-none tracking-[-.035em]">
             CashPilot
           </div>
           <div className="text-[10px] font-bold uppercase tracking-[.14em] text-muted">
@@ -155,10 +155,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             onClick={() => setMobileOpen(false)}
             className={({ isActive }) =>
               cn(
-                "flex h-10 items-center gap-3 rounded-[10px] px-3 text-sm font-semibold transition-colors",
+                "flex h-10 items-center gap-3 rounded-lg border-l-2 px-3 text-sm font-semibold transition-colors",
                 isActive
-                  ? "bg-ink text-white shadow-sm"
-                  : "text-muted hover:bg-ink/5 hover:text-ink",
+                  ? "border-brand bg-brand-soft/70 text-brand-dark"
+                  : "border-transparent text-muted hover:bg-ink/5 hover:text-ink",
               )
             }
           >
@@ -172,7 +172,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </NavLink>
         ))}
       </nav>
-      <div className="mt-auto rounded-[14px] border border-brand/15 bg-brand-soft/70 p-3">
+      <div className="mt-auto border-t border-line px-2 pt-4">
         <div className="flex items-center gap-2 text-xs font-bold text-brand-dark">
           <Bot size={15} /> Agent online
         </div>
@@ -209,7 +209,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
       )}
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-30 flex h-16 items-center border-b border-line bg-canvas/90 px-4 backdrop-blur-xl md:px-7">
+        <header className="sticky top-0 z-30 flex h-16 items-center border-b border-line bg-[#f8f5ee]/90 px-4 backdrop-blur-xl md:px-8">
           <Button
             aria-label="Open menu"
             variant="ghost"
@@ -307,10 +307,10 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
             <div className="relative">
               <button
-                className="flex items-center gap-2 rounded-xl border border-line bg-white py-1.5 pl-1.5 pr-2 text-left shadow-sm"
+                className="ui-button ui-button-outline flex items-center gap-2 rounded-lg border border-line bg-white py-1.5 pl-1.5 pr-2 text-left"
                 onClick={() => setRoleOpen((v) => !v)}
               >
-                <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink text-[11px] font-bold text-white">
+                <span className="grid h-8 w-8 place-items-center rounded-md bg-brand-soft text-[11px] font-bold text-brand-dark">
                   {person.avatar}
                 </span>
                 <span className="hidden sm:block">
@@ -341,7 +341,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </div>
           </div>
         </header>
-        <main className="mx-auto max-w-[1500px] p-4 pb-24 md:p-7 md:pb-24">
+        <main className="mx-auto max-w-[1480px] p-4 pb-24 md:p-8 md:pb-24">
           <div key={`${role}-${location.pathname}`} className="page-enter">
             {children}
           </div>
