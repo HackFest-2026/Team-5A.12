@@ -1,5 +1,11 @@
-import { useState } from "react";
-import { CheckCircle2, Clock3, MessageSquareWarning, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  CheckCircle2,
+  Clock3,
+  MessageSquareWarning,
+  Plus,
+  Search,
+} from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { useRole } from "@/context/role-context";
 import { useApi } from "@/hooks/use-api";
@@ -9,9 +15,10 @@ import { money, relativeDate } from "@/lib/utils";
 import { PageHeading } from "@/components/page-heading";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { Card, CardContent } from "@/components/ui/card";
+import { Empty } from "@/components/ui/empty";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Select } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 
 type Dispute = {
@@ -40,10 +47,19 @@ export function DisputesPage() {
     role === "customer" ? "/api/invoices" : "/api/disputes",
   );
   const open = searchParams.get("modal") === "open-dispute";
+  const search = searchParams.get("search") ?? "";
+  const status = searchParams.get("status") ?? "all";
+  const sort = searchParams.get("sort") ?? "newest";
   const setOpen = (value: boolean) => {
     const next = new URLSearchParams(searchParams);
     if (value) next.set("modal", "open-dispute");
     else next.delete("modal");
+    setSearchParams(next, { replace: true });
+  };
+  const setFilter = (key: string, value: string, defaultValue = "all") => {
+    const next = new URLSearchParams(searchParams);
+    if (!value || value === defaultValue) next.delete(key);
+    else next.set(key, value);
     setSearchParams(next, { replace: true });
   };
   const [selected, setSelected] = useState<Dispute | null>(null);
@@ -53,6 +69,23 @@ export function DisputesPage() {
     detail: "",
   });
   const [notice, setNotice] = useState("");
+  const visible = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return [...(data ?? [])]
+      .filter(
+        (dispute) =>
+          (status === "all" || dispute.status === status) &&
+          `${dispute.number} ${dispute.company} ${dispute.reason} ${dispute.detail}`
+            .toLowerCase()
+            .includes(query),
+      )
+      .sort((a, b) => {
+        if (sort === "oldest")
+          return +new Date(a.created_at) - +new Date(b.created_at);
+        if (sort === "amount_desc") return b.amount - a.amount;
+        return +new Date(b.created_at) - +new Date(a.created_at);
+      });
+  }, [data, search, sort, status]);
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
@@ -146,61 +179,99 @@ export function DisputesPage() {
           </CardContent>
         </Card>
       )}
-      <div className="space-y-4">
-        {data.map((dispute) => (
-          <Card key={dispute.id}>
-            <CardContent className="flex flex-col gap-4 sm:flex-row">
-              <div
-                className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${dispute.status === "resolved" ? "bg-brand-soft text-brand-dark" : "bg-coral-soft text-coral"}`}
-              >
-                {dispute.status === "resolved" ? (
-                  <CheckCircle2 size={19} />
-                ) : (
-                  <MessageSquareWarning size={19} />
-                )}
-              </div>
-              <div className="flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="font-bold">
-                    {dispute.number} · {dispute.company}
-                  </h2>
-                  <Badge
-                    tone={tone(dispute.status) as "green" | "red" | "amber"}
-                  >
-                    {dispute.status.replace("_", " ")}
-                  </Badge>
-                </div>
-                <p className="mt-1 text-sm font-semibold">{dispute.reason}</p>
-                <p className="mt-1 text-sm leading-6 text-muted">
-                  {dispute.detail}
-                </p>
-                {dispute.resolution_note && (
-                  <div className="mt-3 rounded-xl bg-brand-soft p-3 text-sm text-brand-dark">
-                    <b>Resolution update:</b> {dispute.resolution_note}
-                    <p className="mt-1 text-[10px] font-bold uppercase tracking-wide opacity-60">
-                      Reviewed by {dispute.reviewed_by}
-                    </p>
-                  </div>
-                )}
-                <p className="mt-3 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-muted/70">
-                  <Clock3 size={11} />
-                  Opened {relativeDate(dispute.created_at)} ·{" "}
-                  {money(dispute.amount)}
-                </p>
-              </div>
-              {role !== "customer" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSelected(dispute)}
+      <Card className="mb-4 p-4">
+        <div className="flex flex-col gap-3 lg:flex-row">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-3 text-muted" size={16} />
+            <Input
+              className="pl-9"
+              placeholder="Search invoice, customer, or reason…"
+              value={search}
+              onChange={(e) => setFilter("search", e.target.value, "")}
+            />
+          </div>
+          <Select
+            value={status}
+            onChange={(e) => setFilter("status", e.target.value)}
+          >
+            <option value="all">All statuses</option>
+            <option value="open">Open</option>
+            <option value="under_review">Under review</option>
+            <option value="resolved">Resolved</option>
+            <option value="rejected">Rejected</option>
+          </Select>
+          <Select
+            value={sort}
+            onChange={(e) => setFilter("sort", e.target.value, "newest")}
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="amount_desc">Highest amount</option>
+          </Select>
+        </div>
+      </Card>
+      {visible.length ? (
+        <div className="space-y-4">
+          {visible.map((dispute) => (
+            <Card key={dispute.id}>
+              <CardContent className="flex flex-col gap-4 sm:flex-row">
+                <div
+                  className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${dispute.status === "resolved" ? "bg-brand-soft text-brand-dark" : "bg-coral-soft text-coral"}`}
                 >
-                  Review case
-                </Button>
-              )}
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+                  {dispute.status === "resolved" ? (
+                    <CheckCircle2 size={19} />
+                  ) : (
+                    <MessageSquareWarning size={19} />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="font-bold">
+                      {dispute.number} · {dispute.company}
+                    </h2>
+                    <Badge
+                      tone={tone(dispute.status) as "green" | "red" | "amber"}
+                    >
+                      {dispute.status.replace("_", " ")}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 text-sm font-semibold">{dispute.reason}</p>
+                  <p className="mt-1 text-sm leading-6 text-muted">
+                    {dispute.detail}
+                  </p>
+                  {dispute.resolution_note && (
+                    <div className="mt-3 rounded-xl bg-brand-soft p-3 text-sm text-brand-dark">
+                      <b>Resolution update:</b> {dispute.resolution_note}
+                      <p className="mt-1 text-[10px] font-bold uppercase tracking-wide opacity-60">
+                        Reviewed by {dispute.reviewed_by}
+                      </p>
+                    </div>
+                  )}
+                  <p className="mt-3 flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-muted/70">
+                    <Clock3 size={11} />
+                    Opened {relativeDate(dispute.created_at)} ·{" "}
+                    {money(dispute.amount)}
+                  </p>
+                </div>
+                {role !== "customer" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSelected(dispute)}
+                  >
+                    Review case
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : (
+        <Empty
+          title="No matching disputes"
+          detail="Try another search or status filter."
+        />
+      )}
       {selected && (
         <ReviewModal
           dispute={selected}

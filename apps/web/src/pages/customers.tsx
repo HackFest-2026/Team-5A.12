@@ -9,6 +9,7 @@ import { money, shortDate } from "@/lib/utils";
 import { PageHeading } from "@/components/page-heading";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { Card } from "@/components/ui/card";
+import { Empty } from "@/components/ui/empty";
 import { Badge } from "@/components/ui/badge";
 import { Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -59,7 +60,9 @@ export function CustomersPage() {
   const { role } = useRole();
   const [searchParams, setSearchParams] = useSearchParams();
   const { data, error, loading, reload } = useApi<Customer[]>("/api/customers");
-  const [search, setSearch] = useState("");
+  const search = searchParams.get("search") ?? "";
+  const segment = searchParams.get("segment") ?? "all";
+  const sort = searchParams.get("sort") ?? "company_asc";
   const [selected, setSelected] = useState("");
   const creating = searchParams.get("modal") === "add-customer";
   const setCreating = (open: boolean) => {
@@ -68,15 +71,31 @@ export function CustomersPage() {
     else next.delete("modal");
     setSearchParams(next, { replace: true });
   };
+  const setFilter = (key: string, value: string, defaultValue = "all") => {
+    const next = new URLSearchParams(searchParams);
+    if (!value || value === defaultValue) next.delete(key);
+    else next.set(key, value);
+    setSearchParams(next, { replace: true });
+  };
   const [notice, setNotice] = useState("");
   const filtered = useMemo(
     () =>
-      (data ?? []).filter((c) =>
-        `${c.company} ${c.name} ${c.email}`
-          .toLowerCase()
-          .includes(search.toLowerCase()),
-      ),
-    [data, search],
+      [...(data ?? [])]
+        .filter(
+          (c) =>
+            (segment === "all" || c.segment === segment) &&
+            `${c.company} ${c.name} ${c.email}`
+              .toLowerCase()
+              .includes(search.toLowerCase()),
+        )
+        .sort((a, b) => {
+          if (sort === "outstanding_desc") return b.outstanding - a.outstanding;
+          if (sort === "health_asc") return a.health_score - b.health_score;
+          if (sort === "overdue_desc")
+            return b.overdue_invoices - a.overdue_invoices;
+          return a.company.localeCompare(b.company);
+        }),
+    [data, search, segment, sort],
   );
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error} retry={reload} />;
@@ -101,87 +120,112 @@ export function CustomersPage() {
         </div>
       )}
       <Card className="overflow-hidden">
-        <div className="border-b border-line p-4">
-          <div className="relative max-w-sm">
+        <div className="flex flex-col gap-3 border-b border-line p-4 lg:flex-row">
+          <div className="relative min-w-0 flex-1">
             <Search className="absolute left-3 top-3 text-muted" size={16} />
             <Input
               className="pl-9"
               placeholder="Search customers…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => setFilter("search", e.target.value, "")}
             />
           </div>
+          <Select
+            value={segment}
+            onChange={(e) => setFilter("segment", e.target.value)}
+          >
+            <option value="all">All segments</option>
+            <option value="Enterprise">Enterprise</option>
+            <option value="Growth">Growth</option>
+            <option value="SMB">SMB</option>
+          </Select>
+          <Select
+            value={sort}
+            onChange={(e) => setFilter("sort", e.target.value, "company_asc")}
+          >
+            <option value="company_asc">Company A–Z</option>
+            <option value="outstanding_desc">Highest outstanding</option>
+            <option value="health_asc">Lowest health</option>
+            <option value="overdue_desc">Most overdue invoices</option>
+          </Select>
         </div>
-        <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-3">
-          {filtered.map((c) => (
-            <article
-              key={c.id}
-              onClick={() => setSelected(c.id)}
-              className="cursor-pointer bg-white p-5 transition-colors hover:bg-canvas/60"
-            >
-              <div className="flex items-start justify-between">
-                <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink text-xs font-bold text-white">
-                  {c.company
-                    .split(" ")
-                    .map((x) => x[0])
-                    .slice(0, 2)
-                    .join("")}
+        {filtered.length ? (
+          <div className="grid gap-px bg-line sm:grid-cols-2 xl:grid-cols-3">
+            {filtered.map((c) => (
+              <article
+                key={c.id}
+                onClick={() => setSelected(c.id)}
+                className="cursor-pointer bg-white p-5 transition-colors hover:bg-canvas/60"
+              >
+                <div className="flex items-start justify-between">
+                  <div className="grid h-10 w-10 place-items-center rounded-xl bg-ink text-xs font-bold text-white">
+                    {c.company
+                      .split(" ")
+                      .map((x) => x[0])
+                      .slice(0, 2)
+                      .join("")}
+                  </div>
+                  <Badge
+                    tone={
+                      c.health_score > 80
+                        ? "green"
+                        : c.health_score > 60
+                          ? "amber"
+                          : "red"
+                    }
+                  >
+                    {c.health_score} health
+                  </Badge>
                 </div>
-                <Badge
-                  tone={
-                    c.health_score > 80
-                      ? "green"
-                      : c.health_score > 60
-                        ? "amber"
-                        : "red"
-                  }
-                >
-                  {c.health_score} health
-                </Badge>
-              </div>
-              <h3 className="mt-4 font-bold">{c.company}</h3>
-              <p className="mt-0.5 text-xs text-muted">
-                {c.name} · {c.segment}
-              </p>
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
-                    Outstanding
-                  </p>
-                  <p className="mt-1 font-bold tabular">
-                    {money(c.outstanding, true)}
-                  </p>
+                <h3 className="mt-4 font-bold">{c.company}</h3>
+                <p className="mt-0.5 text-xs text-muted">
+                  {c.name} · {c.segment}
+                </p>
+                <div className="mt-5 grid grid-cols-2 gap-3">
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                      Outstanding
+                    </p>
+                    <p className="mt-1 font-bold tabular">
+                      {money(c.outstanding, true)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
+                      Terms
+                    </p>
+                    <p className="mt-1 font-bold">Net {c.payment_terms}</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-wide text-muted">
-                    Terms
-                  </p>
-                  <p className="mt-1 font-bold">Net {c.payment_terms}</p>
+                <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
+                  <span
+                    className={
+                      c.overdue_invoices
+                        ? "text-xs font-bold text-coral"
+                        : "text-xs font-semibold text-muted"
+                    }
+                  >
+                    {c.overdue_invoices
+                      ? `${c.overdue_invoices} overdue invoice${c.overdue_invoices > 1 ? "s" : ""}`
+                      : "No overdue exposure"}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelected(c.id)}
+                  >
+                    Open <ArrowUpRight size={13} />
+                  </Button>
                 </div>
-              </div>
-              <div className="mt-4 flex items-center justify-between border-t border-line pt-4">
-                <span
-                  className={
-                    c.overdue_invoices
-                      ? "text-xs font-bold text-coral"
-                      : "text-xs font-semibold text-muted"
-                  }
-                >
-                  {c.overdue_invoices
-                    ? `${c.overdue_invoices} overdue invoice${c.overdue_invoices > 1 ? "s" : ""}`
-                    : "No overdue exposure"}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setSelected(c.id)}
-                >
-                  Open <ArrowUpRight size={13} />
-                </Button>
-              </div>
-            </article>
-          ))}
-        </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            title="No matching customers"
+            detail="Try another search or segment filter."
+          />
+        )}
       </Card>
       {creating && role === "cfo" && (
         <CustomerForm

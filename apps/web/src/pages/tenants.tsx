@@ -7,6 +7,7 @@ import {
   CircleOff,
   Pencil,
   Plus,
+  Search,
   ShieldCheck,
   UserPlus,
   Users,
@@ -19,6 +20,7 @@ import { money, shortDate } from "@/lib/utils";
 import { PageHeading } from "@/components/page-heading";
 import { ErrorState, LoadingState } from "@/components/data-state";
 import { Card } from "@/components/ui/card";
+import { Empty } from "@/components/ui/empty";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,6 +67,13 @@ const blankUser = {
 export function TenantsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tenants = useApi<Tenant[]>("/api/tenants");
+  const search = searchParams.get("search") ?? "";
+  const tenantStatus = searchParams.get("status") ?? "all";
+  const plan = searchParams.get("plan") ?? "all";
+  const sort = searchParams.get("sort") ?? "name_asc";
+  const userSearch = searchParams.get("userSearch") ?? "";
+  const userRole = searchParams.get("userRole") ?? "all";
+  const userStatus = searchParams.get("userStatus") ?? "all";
   const [selected, setSelected] = useState("");
   const users = useApi<TenantUser[]>(
     `/api/tenants/${selected || "none"}/users`,
@@ -75,6 +84,12 @@ export function TenantsPage() {
     const next = new URLSearchParams(searchParams);
     if (panel) next.set("panel", panel);
     else next.delete("panel");
+    setSearchParams(next, { replace: true });
+  };
+  const setFilter = (key: string, value: string, defaultValue = "all") => {
+    const next = new URLSearchParams(searchParams);
+    if (!value || value === defaultValue) next.delete(key);
+    else next.set(key, value);
     setSearchParams(next, { replace: true });
   };
   const setProvisioning = (open: boolean | ((value: boolean) => boolean)) => {
@@ -98,10 +113,39 @@ export function TenantsPage() {
   }>("action.user.provision", blankUser);
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
+  const visibleTenants = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return [...(tenants.data ?? [])]
+      .filter(
+        (tenant) =>
+          (tenantStatus === "all" || tenant.status === tenantStatus) &&
+          (plan === "all" || tenant.plan === plan) &&
+          `${tenant.name} ${tenant.slug} ${tenant.contact_email}`
+            .toLowerCase()
+            .includes(query),
+      )
+      .sort((a, b) => {
+        if (sort === "volume_desc") return b.monthly_volume - a.monthly_volume;
+        if (sort === "users_desc") return b.user_count - a.user_count;
+        if (sort === "newest")
+          return +new Date(b.created_at) - +new Date(a.created_at);
+        return a.name.localeCompare(b.name);
+      });
+  }, [plan, search, sort, tenantStatus, tenants.data]);
   useEffect(() => {
-    if (!selected && tenants.data?.[0]) setSelected(tenants.data[0].id);
-  }, [selected, tenants.data]);
+    if (!visibleTenants.some((tenant) => tenant.id === selected))
+      setSelected(visibleTenants[0]?.id ?? "");
+  }, [selected, visibleTenants]);
   const current = tenants.data?.find((t) => t.id === selected);
+  const visibleUsers = useMemo(() => {
+    const query = userSearch.trim().toLowerCase();
+    return (users.data ?? []).filter(
+      (user) =>
+        (userRole === "all" || user.role === userRole) &&
+        (userStatus === "all" || user.status === userStatus) &&
+        `${user.name} ${user.email}`.toLowerCase().includes(query),
+    );
+  }, [userRole, userSearch, userStatus, users.data]);
   const metrics = useMemo(
     () => ({
       active: tenants.data?.filter((t) => t.status === "active").length ?? 0,
@@ -375,9 +419,60 @@ export function TenantsPage() {
           </form>
         </Card>
       )}
+      <Card className="mb-5 p-4">
+        <div className="flex flex-col gap-3 xl:flex-row">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-3 text-muted" size={16} />
+            <Input
+              className="pl-9"
+              placeholder="Search workspaces…"
+              value={search}
+              onChange={(e) => setFilter("search", e.target.value, "")}
+            />
+          </div>
+          <select
+            value={tenantStatus}
+            onChange={(e) => setFilter("status", e.target.value)}
+            className="h-10 rounded-[10px] border border-line bg-white px-3 text-sm font-semibold outline-none focus:border-brand"
+          >
+            <option value="all">All statuses</option>
+            <option value="active">Active</option>
+            <option value="suspended">Suspended</option>
+            <option value="archived">Archived</option>
+          </select>
+          <select
+            value={plan}
+            onChange={(e) => setFilter("plan", e.target.value)}
+            className="h-10 rounded-[10px] border border-line bg-white px-3 text-sm font-semibold outline-none focus:border-brand"
+          >
+            <option value="all">All plans</option>
+            <option value="Starter">Starter</option>
+            <option value="Growth">Growth</option>
+            <option value="Scale">Scale</option>
+          </select>
+          <select
+            value={sort}
+            onChange={(e) => setFilter("sort", e.target.value, "name_asc")}
+            className="h-10 rounded-[10px] border border-line bg-white px-3 text-sm font-semibold outline-none focus:border-brand"
+          >
+            <option value="name_asc">Name A–Z</option>
+            <option value="volume_desc">Highest volume</option>
+            <option value="users_desc">Most users</option>
+            <option value="newest">Newest first</option>
+          </select>
+        </div>
+      </Card>
       <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
         <div className="space-y-2">
-          {tenants.data.map((t) => (
+          {!visibleTenants.length && (
+            <Card>
+              <Empty
+                title="No matching tenants"
+                detail="Try another search, status, or plan."
+              />
+            </Card>
+          )}
+          {visibleTenants.map((t) => (
             <button
               key={t.id}
               onClick={() => {
@@ -663,6 +758,41 @@ export function TenantsPage() {
                   </div>
                 </form>
               )}
+              <div className="mb-4 flex flex-col gap-2 md:flex-row">
+                <div className="relative min-w-0 flex-1">
+                  <Search
+                    className="absolute left-3 top-2.5 text-muted"
+                    size={15}
+                  />
+                  <Input
+                    className="h-9 pl-9"
+                    placeholder="Search users…"
+                    value={userSearch}
+                    onChange={(e) =>
+                      setFilter("userSearch", e.target.value, "")
+                    }
+                  />
+                </div>
+                <select
+                  value={userRole}
+                  onChange={(e) => setFilter("userRole", e.target.value)}
+                  className="h-9 rounded-[10px] border border-line bg-white px-3 text-xs font-semibold"
+                >
+                  <option value="all">All roles</option>
+                  <option value="cfo">CFO</option>
+                  <option value="manager">Manager</option>
+                  <option value="customer">Customer</option>
+                </select>
+                <select
+                  value={userStatus}
+                  onChange={(e) => setFilter("userStatus", e.target.value)}
+                  className="h-9 rounded-[10px] border border-line bg-white px-3 text-xs font-semibold"
+                >
+                  <option value="all">All access</option>
+                  <option value="active">Active</option>
+                  <option value="disabled">Disabled</option>
+                </select>
+              </div>
               {users.loading ? (
                 <LoadingState />
               ) : users.error ? (
@@ -680,7 +810,7 @@ export function TenantsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {users.data?.map((user) => (
+                      {visibleUsers.map((user) => (
                         <tr
                           key={user.id}
                           className="border-b border-line/70 last:border-0"

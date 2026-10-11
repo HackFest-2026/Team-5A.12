@@ -16,6 +16,7 @@ import { money, shortDate } from "@/lib/utils";
 import { PageHeading } from "@/components/page-heading";
 import { ErrorState, LoadingState, Stat } from "@/components/data-state";
 import { Card } from "@/components/ui/card";
+import { Empty } from "@/components/ui/empty";
 import { Badge } from "@/components/ui/badge";
 import { Input, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -52,7 +53,9 @@ export function PaymentsPage() {
   const invoices = useApi<Invoice[]>(
     role === "cfo" ? "/api/invoices" : "/api/payments",
   );
-  const [search, setSearch] = useState("");
+  const search = searchParams.get("search") ?? "";
+  const method = searchParams.get("method") ?? "all";
+  const sort = searchParams.get("sort") ?? "newest";
   const creating = searchParams.get("modal") === "record-payment";
   const setCreating = (open: boolean) => {
     const next = new URLSearchParams(searchParams);
@@ -60,16 +63,32 @@ export function PaymentsPage() {
     else next.delete("modal");
     setSearchParams(next, { replace: true });
   };
+  const setFilter = (key: string, value: string, defaultValue = "all") => {
+    const next = new URLSearchParams(searchParams);
+    if (!value || value === defaultValue) next.delete(key);
+    else next.set(key, value);
+    setSearchParams(next, { replace: true });
+  };
   const [selected, setSelected] = useState<Payment | null>(null);
   const [notice, setNotice] = useState("");
   const filtered = useMemo(
     () =>
-      (data ?? []).filter((p) =>
-        `${p.reference} ${p.company} ${p.number}`
-          .toLowerCase()
-          .includes(search.toLowerCase()),
-      ),
-    [data, search],
+      [...(data ?? [])]
+        .filter(
+          (p) =>
+            (method === "all" || p.method === method) &&
+            `${p.reference} ${p.company} ${p.number}`
+              .toLowerCase()
+              .includes(search.toLowerCase()),
+        )
+        .sort((a, b) => {
+          if (sort === "oldest")
+            return +new Date(a.paid_at) - +new Date(b.paid_at);
+          if (sort === "amount_desc") return b.amount - a.amount;
+          if (sort === "company_asc") return a.company.localeCompare(b.company);
+          return +new Date(b.paid_at) - +new Date(a.paid_at);
+        }),
+    [data, method, search, sort],
   );
   if (loading) return <LoadingState />;
   if (error || !data) return <ErrorState message={error} retry={reload} />;
@@ -113,46 +132,71 @@ export function PaymentsPage() {
         <Stat label="Reconciliation" value="100%" note="Every receipt linked" />
       </div>
       <Card className="overflow-hidden">
-        <div className="flex items-center gap-3 border-b border-line p-4">
-          <div className="relative max-w-sm flex-1">
+        <div className="flex flex-col gap-3 border-b border-line p-4 lg:flex-row">
+          <div className="relative min-w-0 flex-1">
             <Search className="absolute left-3 top-3 text-muted" size={16} />
             <Input
               className="pl-9"
               placeholder="Search payment reference…"
               value={search}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => setFilter("search", e.target.value, "")}
             />
           </div>
+          <Select
+            value={method}
+            onChange={(e) => setFilter("method", e.target.value)}
+          >
+            <option value="all">All methods</option>
+            <option>Bank transfer</option>
+            <option>UPI</option>
+            <option>Card</option>
+          </Select>
+          <Select
+            value={sort}
+            onChange={(e) => setFilter("sort", e.target.value, "newest")}
+          >
+            <option value="newest">Newest first</option>
+            <option value="oldest">Oldest first</option>
+            <option value="amount_desc">Highest amount</option>
+            <option value="company_asc">Company A–Z</option>
+          </Select>
         </div>
-        <div className="divide-y divide-line">
-          {filtered.map((payment) => {
-            const Icon = icons[payment.method] ?? CreditCard;
-            return (
-              <div
-                key={payment.id}
-                onClick={() => setSelected(payment)}
-                className="flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:bg-canvas/60 sm:flex-row sm:items-center sm:px-5"
-              >
-                <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-canvas text-muted">
-                  <Icon size={18} />
+        {filtered.length ? (
+          <div className="divide-y divide-line">
+            {filtered.map((payment) => {
+              const Icon = icons[payment.method] ?? CreditCard;
+              return (
+                <div
+                  key={payment.id}
+                  onClick={() => setSelected(payment)}
+                  className="flex cursor-pointer flex-col gap-3 p-4 transition-colors hover:bg-canvas/60 sm:flex-row sm:items-center sm:px-5"
+                >
+                  <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-canvas text-muted">
+                    <Icon size={18} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-bold">{payment.company}</p>
+                    <p className="mt-0.5 text-xs text-muted">
+                      {payment.number} · {payment.reference}
+                    </p>
+                  </div>
+                  <div className="sm:text-right">
+                    <p className="font-bold tabular">{money(payment.amount)}</p>
+                    <p className="text-xs text-muted">
+                      {shortDate(payment.paid_at)}
+                    </p>
+                  </div>
+                  <Badge tone="green">{payment.status}</Badge>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-bold">{payment.company}</p>
-                  <p className="mt-0.5 text-xs text-muted">
-                    {payment.number} · {payment.reference}
-                  </p>
-                </div>
-                <div className="sm:text-right">
-                  <p className="font-bold tabular">{money(payment.amount)}</p>
-                  <p className="text-xs text-muted">
-                    {shortDate(payment.paid_at)}
-                  </p>
-                </div>
-                <Badge tone="green">{payment.status}</Badge>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        ) : (
+          <Empty
+            title="No matching payments"
+            detail="Try another search or payment method."
+          />
+        )}
       </Card>
       {creating && role === "cfo" && (
         <PaymentCreate

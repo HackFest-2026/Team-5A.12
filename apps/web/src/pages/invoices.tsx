@@ -88,13 +88,19 @@ export function InvoicesPage() {
   const search = searchParams.get("search") ?? "";
   const requestedStatus = searchParams.get("status") ?? "all";
   const status = statuses.includes(requestedStatus) ? requestedStatus : "all";
+  const sort = searchParams.get("sort") ?? "due_asc";
   const creating = searchParams.get("modal") === "create-invoice";
   const selected = searchParams.get("invoice") ?? "";
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
-  const setFilter = (key: "search" | "status", value: string) => {
+  const setFilter = (key: "search" | "status" | "sort", value: string) => {
     const next = new URLSearchParams(searchParams);
-    if (!value || (key === "status" && value === "all")) next.delete(key);
+    if (
+      !value ||
+      (key === "status" && value === "all") ||
+      (key === "sort" && value === "due_asc")
+    )
+      next.delete(key);
     else next.set(key, value);
     setSearchParams(next, { replace: true });
   };
@@ -116,14 +122,23 @@ export function InvoicesPage() {
   );
   const filtered = useMemo(
     () =>
-      (data ?? []).filter(
-        (item) =>
-          (status === "all" || item.status === status) &&
-          `${item.number} ${item.company}`
-            .toLowerCase()
-            .includes(search.toLowerCase()),
-      ),
-    [data, search, status],
+      [...(data ?? [])]
+        .filter(
+          (item) =>
+            (status === "all" || item.status === status) &&
+            `${item.number} ${item.company}`
+              .toLowerCase()
+              .includes(search.toLowerCase()),
+        )
+        .sort((a, b) => {
+          if (sort === "due_desc")
+            return +new Date(b.due_date) - +new Date(a.due_date);
+          if (sort === "amount_desc") return b.amount - a.amount;
+          if (sort === "balance_desc") return b.balance - a.balance;
+          if (sort === "risk_desc") return b.risk_score - a.risk_score;
+          return +new Date(a.due_date) - +new Date(b.due_date);
+        }),
+    [data, search, sort, status],
   );
   useEffect(() => {
     window.dispatchEvent(
@@ -134,7 +149,7 @@ export function InvoicesPage() {
         },
       }),
     );
-  }, [creating, filtered.length, search, selected, status]);
+  }, [creating, filtered.length, search, selected, sort, status]);
   const remind = async (invoice: Invoice) => {
     setBusy(invoice.id);
     setNotice("");
@@ -185,7 +200,7 @@ export function InvoicesPage() {
         </div>
       )}
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center">
+        <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:flex-wrap sm:items-center">
           <div className="relative min-w-0 flex-1 sm:max-w-sm">
             <Search className="absolute left-3 top-3 text-muted" size={16} />
             <Input
@@ -205,6 +220,16 @@ export function InvoicesPage() {
                 {value.replace("_", " ")}
               </option>
             ))}
+          </Select>
+          <Select
+            value={sort}
+            onChange={(e) => setFilter("sort", e.target.value)}
+          >
+            <option value="due_asc">Due date: earliest</option>
+            <option value="due_desc">Due date: latest</option>
+            <option value="amount_desc">Highest total</option>
+            <option value="balance_desc">Highest balance</option>
+            <option value="risk_desc">Highest risk</option>
           </Select>
           <Button variant="outline">
             <Download size={15} />
