@@ -18,6 +18,7 @@ import {
 } from "./agent/runtime.js";
 import { db, query } from "./db.js";
 import { audit } from "./domain/audit.js";
+import { deleteInvoice, FinanceError } from "./domain/finance-service.js";
 import type { Actor, Role } from "./domain/types.js";
 
 const app = express();
@@ -373,11 +374,11 @@ app.post(
     const a = actor(req);
     const input = invoiceSchema.parse(req.body);
     const id = `i-${crypto.randomUUID()}`;
-    const count = await query<any>(
-      "SELECT count(*)::int n FROM invoices WHERE tenant_id=$1",
-      [a.tenantId],
+    const [next] = await query<any>(
+      `SELECT GREATEST(2090,COALESCE(max(substring(number from '[0-9]+')::int),2089)+1)::int n
+       FROM invoices`,
     );
-    const number = `INV-${2090 + count[0].n}`;
+    const number = `INV-${next.n}`;
     const [created] = await query(
       `INSERT INTO invoices
     (id,tenant_id,customer_id,number,amount,status,issue_date,due_date,category,risk_score)
@@ -478,27 +479,7 @@ app.delete(
   allow("cfo"),
   asyncRoute(async (req, res) => {
     const a = actor(req);
-    const [invoice] = await query<any>(
-      `SELECT i.*,
-    EXISTS(SELECT 1 FROM payments p WHERE p.invoice_id=i.id) has_payments,
-    EXISTS(SELECT 1 FROM disputes d WHERE d.invoice_id=i.id) has_disputes
-    FROM invoices i WHERE i.id=$1 AND i.tenant_id=$2`,
-      [req.params.id, a.tenantId],
-    );
-    if (!invoice) return res.status(404).json({ error: "Invoice not found." });
-    if (invoice.has_payments || invoice.has_disputes)
-      return res.status(409).json({
-        error: "Invoices with payments or disputes cannot be deleted.",
-      });
-    await query(`DELETE FROM invoices WHERE id=$1`, [invoice.id]);
-    await audit(
-      a,
-      "deleted invoice",
-      "invoice",
-      invoice.number,
-      `${invoice.number} was permanently deleted.`,
-    );
-    res.json({ ok: true });
+    res.json(await deleteInvoice(a, { invoiceId: req.params.id }));
   }),
 );
 
@@ -914,6 +895,103 @@ app.get(
         [a.tenantId],
       ),
     );
+  }),
+);
+
+const approvalFieldsSchema = z.object({
+  title: z.string().trim().min(3).max(160),
+  description: z.string().trim().min(10).max(2000),
+  actionType: z.string().trim().min(2).max(80),
+  amount: z.number().nonnegative().nullable(),
+  risk: z.enum(["low", "medium", "high"]),
+});
+
+app.post(
+  "/api/approvals",
+  allow("cfo"),
+  asyncRoute(async (req, res) => {
+    const a = actor(req);
+    const input = approvalFieldsSchema.parse(req.body);
+    const id = `a-${randomUUID()}`;
+    const [approval] = await query<any>(
+      `INSERT INTO approvals
+        (id,tenant_id,title,description,action_type,amount,risk,status,requested_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8)
+       RETURNING *,amount::float`,
+      [
+        id,
+        a.tenantId,
+        input.title,
+        input.description,
+        input.actionType,
+        input.amount,
+        input.risk,
+        a.name,
+      ],
+    );
+    await audit(
+      a,
+      "created approval request",
+      "approval",
+      id,
+      `${input.title} was added to the approval queue.`,
+    );
+    res.status(201).json(approval);
+  }),
+);
+
+app.patch(
+  "/api/approvals/:id",
+  allow("cfo"),
+  asyncRoute(async (req, res) => {
+    const a = actor(req);
+    const input = approvalFieldsSchema.parse(req.body);
+    const [approval] = await query<any>(
+      `UPDATE approvals SET title=$1,description=$2,action_type=$3,amount=$4,risk=$5
+       WHERE id=$6 AND tenant_id=$7 RETURNING *,amount::float`,
+      [
+        input.title,
+        input.description,
+        input.actionType,
+        input.amount,
+        input.risk,
+        req.params.id,
+        a.tenantId,
+      ],
+    );
+    if (!approval)
+      return res.status(404).json({ error: "Approval not found." });
+    await audit(
+      a,
+      "updated approval request",
+      "approval",
+      approval.id,
+      `${approval.title} details were updated.`,
+    );
+    res.json(approval);
+  }),
+);
+
+app.delete(
+  "/api/approvals/:id",
+  allow("cfo"),
+  asyncRoute(async (req, res) => {
+    const a = actor(req);
+    const [approval] = await query<any>(
+      `DELETE FROM approvals WHERE id=$1 AND tenant_id=$2
+       RETURNING id,title,status`,
+      [req.params.id, a.tenantId],
+    );
+    if (!approval)
+      return res.status(404).json({ error: "Approval not found." });
+    await audit(
+      a,
+      "deleted approval request",
+      "approval",
+      approval.id,
+      `${approval.title} (${approval.status}) was deleted.`,
+    );
+    res.status(204).end();
   }),
 );
 
@@ -1535,6 +1613,8 @@ app.get("/api/context/catalog", (req, res) => {
 
 app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
   console.error(error);
+  if (error instanceof FinanceError)
+    return res.status(error.status).json({ error: error.message });
   if (error instanceof z.ZodError)
     return res
       .status(400)

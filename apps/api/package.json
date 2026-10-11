@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "db:migrate": "tsx src/migrate.ts",
+    "db:seed:real": "tsx src/seed-real-data.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "test": "tsx --test src/**/*.test.ts",
@@ -17,6 +18,7 @@
     "@langchain/langgraph-checkpoint-postgres": "^1.0.6",
     "cors": "^2.8.5",
     "dotenv": "^16.6.1",
+    "exceljs": "^4.4.0",
     "express": "^5.1.0",
     "pg": "^8.16.3",
     "zod": "^4.1.11"

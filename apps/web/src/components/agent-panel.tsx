@@ -329,7 +329,16 @@ export function AgentPanel() {
       .map((item) => ({
         role:
           item.author === "agent" ? ("assistant" as const) : ("user" as const),
-        content: item.text,
+        content:
+          item.author === "agent" && item.evidence?.length
+            ? `Verified references from prior tool results:\n${item.evidence
+                .slice(0, 16)
+                .map(
+                  (evidence) =>
+                    `${evidence.sourceType} id=${evidence.sourceId} ${evidence.field}=${JSON.stringify(evidence.value)}`,
+                )
+                .join("\n")}\nAssistant answer:\n${item.text}`
+            : item.text,
       }));
     setInput("");
     setMessages((items) => [
@@ -451,6 +460,7 @@ export function AgentPanel() {
           text: error instanceof Error ? error.message : "The action failed.",
         },
       ]);
+      if (decision === "confirm") setPendingAction(null);
     } finally {
       setBusy(false);
     }

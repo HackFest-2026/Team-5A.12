@@ -62,6 +62,21 @@ test("sends every write workflow request to the language model", () => {
     isDirectAgentUiIntent("Create customer Acme with email arun@acme.test"),
     false,
   );
+  assert.equal(
+    isDirectAgentUiIntent(
+      "Send a payment reminder for invoice INV-2048 - takes action on behalf of us and to show how undo option works",
+    ),
+    false,
+  );
+  assert.equal(
+    isDirectAgentUiIntent("Show invoice INV-2048 and remind the customer"),
+    false,
+  );
+});
+
+test("keeps read-only page requests on the deterministic navigation path", () => {
+  assert.equal(isDirectAgentUiIntent("Show overdue invoices"), true);
+  assert.equal(isDirectAgentUiIntent("List payments"), true);
 });
 
 test("does not expose invoice creation to a manager", () => {

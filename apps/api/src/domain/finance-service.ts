@@ -4,6 +4,16 @@ import { db, query } from "../db.js";
 import { audit } from "./audit.js";
 import type { Actor } from "./types.js";
 
+export class FinanceError extends Error {
+  status: number;
+
+  constructor(message: string, status = 400) {
+    super(message);
+    this.name = "FinanceError";
+    this.status = status;
+  }
+}
+
 export const createInvoiceInput = z.object({
   customerId: z.string().min(1),
   amount: z.number().positive(),
@@ -22,6 +32,18 @@ export const createCustomerInput = z.object({
   paymentTerms: z.number().int().min(1).max(180),
 });
 
+export const updateCustomerInput = createCustomerInput
+  .partial()
+  .extend({ customerId: z.string().min(1) })
+  .refine(
+    (value) => Object.keys(value).some((key) => key !== "customerId"),
+    "At least one update field is required",
+  );
+
+export const deleteCustomerInput = z.object({
+  customerId: z.string().min(1),
+});
+
 export const updateInvoiceInput = z
   .object({
     invoiceId: z.string().min(1),
@@ -37,12 +59,35 @@ export const updateInvoiceInput = z
     "At least one update field is required",
   );
 
+export const deleteInvoiceInput = z.object({
+  invoiceId: z.string().min(1),
+});
+
 export const recordPaymentInput = z.object({
   invoiceId: z.string().min(1),
   amount: z.number().positive(),
   method: z.enum(["Bank transfer", "UPI", "Card"]),
   reference: z.string().min(3),
   paidAt: z.string().datetime().optional(),
+});
+
+export const updatePaymentInput = z
+  .object({
+    paymentId: z.string().min(1),
+    method: z.enum(["Bank transfer", "UPI", "Card"]).optional(),
+    reference: z.string().min(3).optional(),
+  })
+  .refine(
+    (value) => Object.keys(value).some((key) => key !== "paymentId"),
+    "At least one update field is required",
+  );
+
+export const deletePaymentInput = z.object({
+  paymentId: z.string().min(1),
+});
+
+export const deletePaymentsInput = z.object({
+  paymentIds: z.array(z.string().min(1)).min(1).max(30),
 });
 
 export const openDisputeInput = z.object({
@@ -58,6 +103,28 @@ export const reviewDisputeInput = z.object({
 export const decideApprovalInput = z.object({
   approvalId: z.string().min(1),
   decision: z.enum(["approved", "rejected"]),
+});
+
+const approvalFieldsInput = z.object({
+  title: z.string().trim().min(3).max(160),
+  description: z.string().trim().min(10).max(2000),
+  actionType: z.string().trim().min(2).max(80),
+  amount: z.number().nonnegative().nullable(),
+  risk: z.enum(["low", "medium", "high"]),
+});
+
+export const createApprovalInput = approvalFieldsInput;
+
+export const updateApprovalInput = approvalFieldsInput
+  .partial()
+  .extend({ approvalId: z.string().min(1) })
+  .refine(
+    (value) => Object.keys(value).some((key) => key !== "approvalId"),
+    "At least one update field is required",
+  );
+
+export const deleteApprovalInput = z.object({
+  approvalId: z.string().min(1),
 });
 
 export async function createCustomer(actor: Actor, rawInput: unknown) {
@@ -88,19 +155,82 @@ export async function createCustomer(actor: Actor, rawInput: unknown) {
   return created;
 }
 
+export async function updateCustomer(actor: Actor, rawInput: unknown) {
+  const input = updateCustomerInput.parse(rawInput);
+  const [updated] = await query<any>(
+    `UPDATE customers SET name=COALESCE($1,name),company=COALESCE($2,company),
+    email=COALESCE($3,email),segment=COALESCE($4,segment),
+    health_score=COALESCE($5,health_score),credit_limit=COALESCE($6,credit_limit),
+    payment_terms=COALESCE($7,payment_terms),updated_at=now()
+    WHERE id=$8 AND tenant_id=$9 RETURNING *,credit_limit::float`,
+    [
+      input.name,
+      input.company,
+      input.email?.toLowerCase(),
+      input.segment,
+      input.healthScore,
+      input.creditLimit,
+      input.paymentTerms,
+      input.customerId,
+      actor.tenantId,
+    ],
+  );
+  if (!updated)
+    throw new FinanceError("Customer not found in this workspace.", 404);
+  await audit(
+    actor,
+    "updated customer",
+    "customer",
+    updated.id,
+    `${updated.company} profile updated.`,
+  );
+  return updated;
+}
+
+export async function deleteCustomer(actor: Actor, rawInput: unknown) {
+  const input = deleteCustomerInput.parse(rawInput);
+  const [customer] = await query<any>(
+    `SELECT c.*,
+    EXISTS(SELECT 1 FROM invoices i WHERE i.customer_id=c.id) has_invoices,
+    EXISTS(SELECT 1 FROM users u WHERE u.customer_id=c.id) has_users
+    FROM customers c WHERE c.id=$1 AND c.tenant_id=$2`,
+    [input.customerId, actor.tenantId],
+  );
+  if (!customer)
+    throw new FinanceError("Customer not found in this workspace.", 404);
+  if (customer.has_invoices || customer.has_users)
+    throw new FinanceError(
+      "Customers with invoices or portal users cannot be deleted.",
+      409,
+    );
+  await query(`DELETE FROM customers WHERE id=$1 AND tenant_id=$2`, [
+    customer.id,
+    actor.tenantId,
+  ]);
+  await audit(
+    actor,
+    "deleted customer",
+    "customer",
+    customer.id,
+    `${customer.company} was deleted.`,
+  );
+  return { id: customer.id, company: customer.company };
+}
+
 export async function createInvoice(actor: Actor, rawInput: unknown) {
   const input = createInvoiceInput.parse(rawInput);
   const [customer] = await query<any>(
     "SELECT id,company FROM customers WHERE id=$1 AND tenant_id=$2",
     [input.customerId, actor.tenantId],
   );
-  if (!customer) throw new Error("Customer not found in this workspace.");
+  if (!customer)
+    throw new FinanceError("Customer not found in this workspace.", 404);
   const id = `i-${randomUUID()}`;
-  const [count] = await query<any>(
-    "SELECT count(*)::int n FROM invoices WHERE tenant_id=$1",
-    [actor.tenantId],
+  const [next] = await query<any>(
+    `SELECT GREATEST(2090,COALESCE(max(substring(number from '[0-9]+')::int),2089)+1)::int n
+     FROM invoices`,
   );
-  const number = `INV-${2090 + count.n}`;
+  const number = `INV-${next.n}`;
   const [created] = await query<any>(
     `INSERT INTO invoices
     (id,tenant_id,customer_id,number,amount,status,issue_date,due_date,category,risk_score)
@@ -133,18 +263,22 @@ export async function updateInvoice(actor: Actor, rawInput: unknown) {
     actor.role === "manager" &&
     Object.keys(input).some((key) => !["invoiceId", "status"].includes(key))
   )
-    throw new Error("Finance Managers can update invoice status only.");
+    throw new FinanceError(
+      "Finance Managers can update invoice status only.",
+      403,
+    );
   const [current] = await query<any>(
     `SELECT *,(amount-paid_amount)::float balance FROM invoices WHERE id=$1 AND tenant_id=$2`,
     [input.invoiceId, actor.tenantId],
   );
-  if (!current) throw new Error("Invoice not found in this workspace.");
+  if (!current)
+    throw new FinanceError("Invoice not found in this workspace.", 404);
   if (input.amount !== undefined && input.amount < Number(current.paid_amount))
-    throw new Error(
+    throw new FinanceError(
       "Invoice total cannot be lower than payments already recorded.",
     );
   if (input.status === "paid" && Number(current.balance) > 0)
-    throw new Error(
+    throw new FinanceError(
       "Record the remaining payment before marking this invoice paid.",
     );
   const [updated] = await query<any>(
@@ -173,6 +307,56 @@ export async function updateInvoice(actor: Actor, rawInput: unknown) {
   return updated;
 }
 
+export async function deleteInvoice(actor: Actor, rawInput: unknown) {
+  const input = deleteInvoiceInput.parse(rawInput);
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const invoiceResult = await client.query<any>(
+      `SELECT id,number FROM invoices WHERE id=$1 AND tenant_id=$2 FOR UPDATE`,
+      [input.invoiceId, actor.tenantId],
+    );
+    const invoice = invoiceResult.rows[0];
+    if (!invoice)
+      throw new FinanceError("Invoice not found in this workspace.", 404);
+    const payments = await client.query(
+      `DELETE FROM payments WHERE invoice_id=$1 AND tenant_id=$2`,
+      [invoice.id, actor.tenantId],
+    );
+    const disputes = await client.query(
+      `DELETE FROM disputes WHERE invoice_id=$1 AND tenant_id=$2`,
+      [invoice.id, actor.tenantId],
+    );
+    await client.query(`DELETE FROM invoices WHERE id=$1 AND tenant_id=$2`, [
+      invoice.id,
+      actor.tenantId,
+    ]);
+    await client.query("COMMIT");
+    await audit(
+      actor,
+      "deleted invoice",
+      "invoice",
+      invoice.number,
+      `${invoice.number} was permanently deleted with ${payments.rowCount ?? 0} linked payment(s) and ${disputes.rowCount ?? 0} linked dispute(s).`,
+    );
+    return {
+      id: invoice.id,
+      number: invoice.number,
+      deletedPayments: payments.rowCount ?? 0,
+      deletedDisputes: disputes.rowCount ?? 0,
+    };
+  } catch (error) {
+    try {
+      await client.query("ROLLBACK");
+    } catch {
+      // Transaction may already be committed or rolled back.
+    }
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function sendInvoiceReminder(actor: Actor, invoiceId: string) {
   const [invoice] = await query<any>(
     `UPDATE invoices SET reminder_count=reminder_count+1,last_reminded_at=now()
@@ -181,7 +365,10 @@ export async function sendInvoiceReminder(actor: Actor, invoiceId: string) {
     [invoiceId, actor.tenantId],
   );
   if (!invoice)
-    throw new Error("Eligible invoice not found in this workspace.");
+    throw new FinanceError(
+      "Eligible invoice not found in this workspace.",
+      404,
+    );
   await audit(
     actor,
     "sent reminder",
@@ -224,9 +411,10 @@ export async function recordPayment(actor: Actor, rawInput: unknown) {
       [input.invoiceId, actor.tenantId],
     );
     const invoice = result.rows[0];
-    if (!invoice) throw new Error("Invoice not found in this workspace.");
+    if (!invoice)
+      throw new FinanceError("Invoice not found in this workspace.", 404);
     if (input.amount > Number(invoice.balance))
-      throw new Error("Payment exceeds the invoice balance.");
+      throw new FinanceError("Payment exceeds the invoice balance.");
     const id = `p-${randomUUID()}`;
     const created = await client.query(
       `INSERT INTO payments (id,tenant_id,invoice_id,customer_id,amount,method,reference,status,paid_at)
@@ -268,6 +456,101 @@ export async function recordPayment(actor: Actor, rawInput: unknown) {
   }
 }
 
+export async function updatePayment(actor: Actor, rawInput: unknown) {
+  const input = updatePaymentInput.parse(rawInput);
+  const [updated] = await query<any>(
+    `UPDATE payments SET method=COALESCE($1,method),reference=COALESCE($2,reference),updated_at=now()
+    WHERE id=$3 AND tenant_id=$4
+    RETURNING id,invoice_id,amount::float,method,reference,status,paid_at`,
+    [input.method, input.reference, input.paymentId, actor.tenantId],
+  );
+  if (!updated)
+    throw new FinanceError("Payment not found in this workspace.", 404);
+  await audit(
+    actor,
+    "updated payment",
+    "payment",
+    updated.id,
+    `${updated.reference} payment details updated.`,
+  );
+  return updated;
+}
+
+export async function deletePayment(actor: Actor, rawInput: unknown) {
+  const input = deletePaymentInput.parse(rawInput);
+  const result = await deletePayments(actor, { paymentIds: [input.paymentId] });
+  return {
+    paymentId: result.deletedPayments[0]?.id,
+    invoice: result.invoices[0],
+  };
+}
+
+export async function deletePayments(actor: Actor, rawInput: unknown) {
+  const input = deletePaymentsInput.parse(rawInput);
+  const paymentIds = [...new Set(input.paymentIds)];
+  const client = await db.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<any>(
+      `SELECT * FROM payments WHERE id=ANY($1::text[]) AND tenant_id=$2 FOR UPDATE`,
+      [paymentIds, actor.tenantId],
+    );
+    if (result.rows.length !== paymentIds.length) {
+      const found = new Set(result.rows.map((payment) => payment.id));
+      const missing = paymentIds.filter((id) => !found.has(id));
+      throw new FinanceError(
+        `Payment${missing.length === 1 ? "" : "s"} not found in this workspace: ${missing.join(", ")}.`,
+        404,
+      );
+    }
+    const invoiceIds = [
+      ...new Set(result.rows.map((payment) => String(payment.invoice_id))),
+    ];
+    await client.query(
+      `DELETE FROM payments WHERE id=ANY($1::text[]) AND tenant_id=$2`,
+      [paymentIds, actor.tenantId],
+    );
+    const invoiceResult = await client.query<any>(
+      `UPDATE invoices i SET
+        paid_amount=COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.invoice_id=i.id),0),
+        status=CASE
+          WHEN COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.invoice_id=i.id),0)>=i.amount THEN 'paid'::invoice_status
+          WHEN COALESCE((SELECT sum(p.amount) FROM payments p WHERE p.invoice_id=i.id),0)>0 THEN 'partially_paid'::invoice_status
+          ELSE 'sent'::invoice_status
+        END,
+        updated_at=now()
+      WHERE i.id=ANY($1::text[]) AND i.tenant_id=$2
+      RETURNING id,number,status,amount::float,paid_amount::float,(amount-paid_amount)::float balance`,
+      [invoiceIds, actor.tenantId],
+    );
+    await client.query("COMMIT");
+    await Promise.all(
+      result.rows.map((payment) =>
+        audit(
+          actor,
+          "deleted payment",
+          "payment",
+          payment.id,
+          `${payment.reference} was removed and the invoice balance restored.`,
+        ),
+      ),
+    );
+    return {
+      deletedPayments: result.rows.map((payment) => ({
+        id: payment.id,
+        reference: payment.reference,
+        amount: Number(payment.amount),
+      })),
+      invoices: invoiceResult.rows,
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function openDispute(actor: Actor, rawInput: unknown) {
   const input = openDisputeInput.parse(rawInput);
   const client = await db.connect();
@@ -278,7 +561,8 @@ export async function openDispute(actor: Actor, rawInput: unknown) {
       [input.invoiceId, actor.tenantId, actor.customerId],
     );
     const invoice = invoiceResult.rows[0];
-    if (!invoice) throw new Error("Invoice not found in your account.");
+    if (!invoice)
+      throw new FinanceError("Invoice not found in your account.", 404);
     const id = `d-${randomUUID()}`;
     await client.query(
       `INSERT INTO disputes (id,tenant_id,invoice_id,customer_id,reason,detail) VALUES ($1,$2,$3,$4,$5,$6)`,
@@ -334,7 +618,8 @@ export async function reviewDispute(actor: Actor, rawInput: unknown) {
       ],
     );
     const dispute = result.rows[0];
-    if (!dispute) throw new Error("Dispute not found in this workspace.");
+    if (!dispute)
+      throw new FinanceError("Dispute not found in this workspace.", 404);
     if (["resolved", "rejected"].includes(input.status))
       await client.query(
         `UPDATE invoices SET status=CASE WHEN paid_amount>=amount THEN 'paid'::invoice_status ELSE 'sent'::invoice_status END,updated_at=now() WHERE id=$1 AND status='disputed'`,
@@ -362,6 +647,85 @@ export async function reviewDispute(actor: Actor, rawInput: unknown) {
   }
 }
 
+export async function createApproval(actor: Actor, rawInput: unknown) {
+  const input = createApprovalInput.parse(rawInput);
+  const id = `a-${randomUUID()}`;
+  const [approval] = await query<any>(
+    `INSERT INTO approvals
+      (id,tenant_id,title,description,action_type,amount,risk,status,requested_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,'pending',$8)
+     RETURNING id,title,description,action_type,amount::float,risk,status,requested_by,created_at`,
+    [
+      id,
+      actor.tenantId,
+      input.title,
+      input.description,
+      input.actionType,
+      input.amount,
+      input.risk,
+      actor.name,
+    ],
+  );
+  await audit(
+    actor,
+    "created approval request",
+    "approval",
+    id,
+    `${input.title} was added to the approval queue.`,
+  );
+  return approval;
+}
+
+export async function updateApproval(actor: Actor, rawInput: unknown) {
+  const input = updateApprovalInput.parse(rawInput);
+  const [approval] = await query<any>(
+    `UPDATE approvals SET title=COALESCE($1,title),description=COALESCE($2,description),
+    action_type=COALESCE($3,action_type),amount=CASE WHEN $4::boolean THEN $5 ELSE amount END,
+    risk=COALESCE($6,risk)
+    WHERE id=$7 AND tenant_id=$8
+    RETURNING id,title,description,action_type,amount::float,risk,status,requested_by,created_at`,
+    [
+      input.title,
+      input.description,
+      input.actionType,
+      Object.prototype.hasOwnProperty.call(input, "amount"),
+      input.amount,
+      input.risk,
+      input.approvalId,
+      actor.tenantId,
+    ],
+  );
+  if (!approval)
+    throw new FinanceError("Approval not found in this workspace.", 404);
+  await audit(
+    actor,
+    "updated approval request",
+    "approval",
+    approval.id,
+    `${approval.title} details were updated.`,
+  );
+  return approval;
+}
+
+export async function deleteApproval(actor: Actor, rawInput: unknown) {
+  const input = deleteApprovalInput.parse(rawInput);
+  const [approval] = await query<any>(
+    `DELETE FROM approvals WHERE id=$1 AND tenant_id=$2
+     RETURNING id,title,status`,
+    [input.approvalId, actor.tenantId],
+  );
+  if (!approval)
+    throw new FinanceError("Approval not found in this workspace.", 404);
+  await audit(
+    actor,
+    "deleted approval request",
+    "approval",
+    approval.id,
+    `${approval.title} (${approval.status}) was deleted.`,
+  );
+  return approval;
+}
+
 export async function decideApproval(actor: Actor, rawInput: unknown) {
   const input = decideApprovalInput.parse(rawInput);
   const [approval] = await query<any>(
@@ -371,7 +735,10 @@ export async function decideApproval(actor: Actor, rawInput: unknown) {
     [input.decision, actor.name, input.approvalId, actor.tenantId],
   );
   if (!approval)
-    throw new Error("Pending approval not found in this workspace.");
+    throw new FinanceError(
+      "Pending approval not found in this workspace.",
+      404,
+    );
   await audit(
     actor,
     `${input.decision} action`,

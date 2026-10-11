@@ -31,6 +31,11 @@ export type NavigationResolution =
 const navigationIntent =
   /\b(open|show|take me|go|navigate|view|see|display|filter|find|where|list)\b/i;
 
+// Direct navigation is intentionally cheap, but it must never swallow a
+// business operation just because the user also says "show" or names a page.
+const operationalIntent =
+  /\b(?:remind|reminder|record|log|create|add|raise|issue|update|edit|change|delete|remove|approve|reject|review|provision|invite|undo)\b/i;
+
 function normalize(value: string) {
   return value
     .toLowerCase()
@@ -73,7 +78,12 @@ export function isDirectAgentUiIntent(messageInput: string) {
   const hasPage = agentCatalog.pages.some(
     (page) => scorePage(message, page) > 0,
   );
-  return !hasExplicitAction && navigationIntent.test(messageInput) && hasPage;
+  return (
+    !hasExplicitAction &&
+    !operationalIntent.test(messageInput) &&
+    navigationIntent.test(messageInput) &&
+    hasPage
+  );
 }
 
 function invoiceRoute(message: string, route: string) {

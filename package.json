@@ -11,6 +11,7 @@
     "typecheck": "npm run typecheck -w @cashpilot/api && npm run typecheck -w @cashpilot/web",
     "db:up": "docker compose up -d postgres",
     "db:migrate": "npm run db:migrate -w @cashpilot/api",
+    "db:seed:real": "npm run db:seed:real -w @cashpilot/api --",
     "db:down": "docker compose down",
     "db:reset": "docker compose down -v && docker compose up -d postgres"
   },

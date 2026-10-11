@@ -82,6 +82,42 @@ const statuses = [
   "disputed",
 ];
 
+function csvCell(value: unknown) {
+  const text = String(value ?? "");
+  return /[",\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
+}
+
+function exportInvoices(rows: Invoice[]) {
+  const columns: Array<[string, (invoice: Invoice) => unknown]> = [
+    ["Invoice", (invoice) => invoice.number],
+    ["Customer", (invoice) => invoice.company],
+    ["Contact", (invoice) => invoice.customer_name],
+    ["Issue date", (invoice) => invoice.issue_date.slice(0, 10)],
+    ["Due date", (invoice) => invoice.due_date.slice(0, 10)],
+    ["Status", (invoice) => invoice.status],
+    ["Category", (invoice) => invoice.category],
+    ["Total (INR)", (invoice) => invoice.amount],
+    ["Paid (INR)", (invoice) => invoice.paid_amount],
+    ["Balance (INR)", (invoice) => invoice.balance],
+    ["Risk score", (invoice) => invoice.risk_score],
+  ];
+  const csv = [
+    columns.map(([label]) => csvCell(label)).join(","),
+    ...rows.map((invoice) =>
+      columns.map(([, read]) => csvCell(read(invoice))).join(","),
+    ),
+  ].join("\n");
+  const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `cashpilot-invoices-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function InvoicesPage() {
   const { role } = useRole();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -231,7 +267,16 @@ export function InvoicesPage() {
             <option value="balance_desc">Highest balance</option>
             <option value="risk_desc">Highest risk</option>
           </Select>
-          <Button variant="outline">
+          <Button
+            variant="outline"
+            disabled={!filtered.length}
+            onClick={() => {
+              exportInvoices(filtered);
+              setNotice(
+                `${filtered.length} invoice${filtered.length === 1 ? "" : "s"} exported.`,
+              );
+            }}
+          >
             <Download size={15} />
             Export
           </Button>
@@ -429,7 +474,23 @@ function InvoiceDetailModal({
     }
   };
   const remove = async () => {
-    if (!confirm(`Delete ${data.number}? This cannot be undone.`)) return;
+    const linked = [
+      data.payments.length
+        ? `${data.payments.length} payment${data.payments.length === 1 ? "" : "s"}`
+        : "",
+      data.disputes.length
+        ? `${data.disputes.length} dispute${data.disputes.length === 1 ? "" : "s"}`
+        : "",
+    ].filter(Boolean);
+    const dependencyWarning = linked.length
+      ? ` This also permanently deletes ${linked.join(" and ")}.`
+      : "";
+    if (
+      !confirm(
+        `Delete ${data.number}?${dependencyWarning} This cannot be undone.`,
+      )
+    )
+      return;
     setSaving(true);
     try {
       await api.delete(`/api/invoices/${id}`);
